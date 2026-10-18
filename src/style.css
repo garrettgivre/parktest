@@ -1,0 +1,75 @@
+:root {
+  --panel: linear-gradient(#3c6e9e, #1d3a5c);
+  --panel-edge: #9cc3e8;
+}
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0d0d10;
+  font-family: "Trebuchet MS", "Verdana", sans-serif;
+  color: #fff;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: none;
+}
+#game, #game canvas { position: fixed; inset: 0; }
+
+#hud {
+  position: fixed;
+  left: max(8px, env(safe-area-inset-left));
+  bottom: 8px;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+.panel {
+  pointer-events: auto;
+  background: var(--panel);
+  border: 2px solid var(--panel-edge);
+  border-radius: 12px 12px 12px 4px;
+  box-shadow: 0 3px 0 #0b1a2b, inset 0 1px 0 #ffffff55;
+  padding: 6px 10px;
+  font-size: 12px;
+  text-shadow: 0 1px 0 #0008;
+}
+.clock .day { opacity: 0.8; font-size: 10px; }
+.clock .time { font-size: 20px; font-weight: bold; letter-spacing: 1px; }
+.speed { display: flex; gap: 4px; margin-top: 2px; }
+.speed button {
+  font: inherit; font-size: 11px; color: #fff;
+  background: #ffffff22; border: 1px solid #ffffff55; border-radius: 6px;
+  padding: 2px 8px;
+}
+.speed button.on { background: #7ec84a; border-color: #c9f5a8; color: #123; text-shadow: none; }
+.meters { min-width: 190px; }
+.target { margin-bottom: 4px; }
+.meter { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+.meter span { width: 62px; font-size: 11px; }
+.meter i {
+  flex: 1; height: 9px; background: #0006; border-radius: 5px; overflow: hidden;
+  border: 1px solid #ffffff44;
+}
+.meter b {
+  display: block; height: 100%; width: var(--v);
+  background: linear-gradient(#fff6, transparent 60%), var(--c);
+  transition: width 0.4s;
+}
+
+#toast {
+  position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+  background: #fffbe0; color: #332; border: 2px solid #c9a43a; border-radius: 10px;
+  padding: 6px 14px; font-size: 13px; opacity: 0; transition: opacity 0.3s;
+  pointer-events: none; text-align: center;
+}
+#toast.show { opacity: 1; }
+
+#rotate {
+  display: none; position: fixed; inset: 0; background: #1d3a5c;
+  align-items: center; justify-content: center; flex-direction: column;
+  text-align: center; font-size: 18px; z-index: 10;
+}
+#rotate div { font-size: 48px; }
+@media (orientation: portrait) and (max-width: 900px) {
+  #rotate { display: flex; }
+}
