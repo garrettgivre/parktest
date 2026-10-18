@@ -88,6 +88,7 @@ class Park extends Phaser.Scene {
   night!: Phaser.GameObjects.Rectangle;
   swans: { img: Phaser.GameObjects.Image; f: number; phase: number; speed: number }[] = [];
   clouds: Phaser.GameObjects.Image[] = [];
+  spinners: { id: string; cars: Phaser.GameObjects.Ellipse[]; i: number; j: number; r: number; z: number; a: number; speed: number }[] = [];
   wheels: { wg: Phaser.GameObjects.Graphics; cars: Phaser.GameObjects.Rectangle[]; cx: number; cy: number; r: number }[] = [];
   drops: { img: Phaser.GameObjects.Image; i: number; j: number; top: number; t: number }[] = [];
   glows: Phaser.GameObjects.Image[] = [];
@@ -181,6 +182,16 @@ class Park extends Phaser.Scene {
       for (let k = 0; k < 8; k++) g.fillStyle(k % 2 ? 0xe74c3c : 0x3498db, 1).fillCircle(10 + k * 11, 14 + Math.sin((k / 7) * Math.PI) * 6, 4);
       g.generateTexture("dropring", 96, 32);
       g.destroy();
+    }
+    // Flat rides: cars circling while the ride runs.
+    this.spinners = [];
+    const SPIN: Record<string, [number, number]> = { carousel: [0.3, 0.6], teacups: [0.18, 1.1], satellite: [1.0, 1.4], swings: [1.0, 1.5], inferno: [0.4, 1.8], bubble: [0.8, 1.0], flipphone: [1.0, 1.2] };
+    for (const l of LOCS) {
+      const sp = SPIN[l.id];
+      if (!sp) continue;
+      const cols = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xff66cc, 0xffffff];
+      const cars = cols.map((c) => this.add.ellipse(0, 0, 22, 14, c).setStrokeStyle(2, 0x000000, 0.5).setDepth(l.i + l.j + 0.6));
+      this.spinners.push({ id: l.id, cars, i: l.i, j: l.j, r: Math.min(l.w, l.d) * 0.42, z: sp[0], a: 0, speed: sp[1] });
     }
     // Cloud shadows drifting over the park (the "glow" texture, darkened).
     const lo2 = uv(-95, -45), hi2 = uv(95, LOT_V + 22);
@@ -1437,6 +1448,14 @@ class Park extends Phaser.Scene {
       wh.cars.forEach((car, k) => {
         const t = wh.wg.rotation + (k / 12) * Math.PI * 2;
         car.setPosition(wh.cx + Math.cos(t) * wh.r, wh.cy + Math.sin(t) * wh.r);
+      });
+    }
+    for (const sp of this.spinners) {
+      if (!this.sim.isClosed(sp.id)) sp.a += (dtMs / 1000) * sp.speed;
+      sp.cars.forEach((car, k) => {
+        const t = sp.a + (k / sp.cars.length) * Math.PI * 2;
+        const p = iso(sp.i + Math.cos(t) * sp.r, sp.j + Math.sin(t) * sp.r, sp.z);
+        car.setPosition(p.x, p.y).setDepth(sp.i + sp.j + (Math.sin(t) + Math.cos(t) > 0 ? 0.6 : -0.1)); // behind the hub on the far side
       });
     }
     for (const d of this.drops) {
