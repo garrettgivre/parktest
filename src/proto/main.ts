@@ -88,6 +88,7 @@ class Park extends Phaser.Scene {
   night!: Phaser.GameObjects.Rectangle;
   swans: { img: Phaser.GameObjects.Image; f: number; phase: number; speed: number }[] = [];
   clouds: Phaser.GameObjects.Image[] = [];
+  fog: { img: Phaser.GameObjects.Image; x: number; y: number; k: number }[] = [];
   spinners: { id: string; cars: Phaser.GameObjects.Ellipse[]; i: number; j: number; r: number; z: number; a: number; speed: number }[] = [];
   wheels: { wg: Phaser.GameObjects.Graphics; cars: Phaser.GameObjects.Rectangle[]; cx: number; cy: number; r: number }[] = [];
   drops: { img: Phaser.GameObjects.Image; i: number; j: number; top: number; t: number }[] = [];
@@ -203,6 +204,16 @@ class Park extends Phaser.Scene {
         targets: drip, y: { from: top.y, to: base.y }, alpha: { from: 0.9, to: 0.6 }, duration: 700, ease: "Quad.easeIn",
         repeat: -1, repeatDelay: 3200, onRepeat: () => drip.setAlpha(0.9),
       });
+    }
+    // Haunt fog: after 7 PM the blend zones (the scare zones) fill with low fog.
+    this.fog = [];
+    for (const id of RING_IDS) {
+      if (ZONES[id].kind !== "blend") continue;
+      for (let k = 0; k < 3; k++) {
+        const q = ringPos(ZONES[id].angle! + (k - 1) * 4, 1 + (k - 1) * 0.18), p = uv(q.u, q.v);
+        const img = this.add.image(p.x, p.y, "glow").setTint(0xdfe6f0).setAlpha(0).setScale(9, 3.5).setDepth(5650);
+        this.fog.push({ img, x: p.x, y: p.y, k: this.fog.length });
+      }
     }
     // Cloud shadows drifting over the park (the "glow" texture, darkened).
     const lo2 = uv(-95, -45), hi2 = uv(95, LOT_V + 22);
@@ -1460,6 +1471,14 @@ class Park extends Phaser.Scene {
         const t = wh.wg.rotation + (k / 12) * Math.PI * 2;
         car.setPosition(wh.cx + Math.cos(t) * wh.r, wh.cy + Math.sin(t) * wh.r);
       });
+    }
+    {
+      const t = this.sim.time, haunt = t >= 19 * 60 ? Math.min(1, (t - 19 * 60) / 30) : 0;
+      for (const f of this.fog) {
+        if (!haunt) { if (f.img.alpha) f.img.setAlpha(0); continue; }
+        const w = this.time.now / 3000 + f.k * 1.3;
+        f.img.setPosition(f.x + Math.sin(w) * 120, f.y + Math.cos(w * 0.7) * 30).setAlpha(haunt * (0.22 + 0.08 * Math.sin(w * 1.7)));
+      }
     }
     for (const sp of this.spinners) {
       if (!this.sim.isClosed(sp.id)) sp.a += (dtMs / 1000) * sp.speed;
