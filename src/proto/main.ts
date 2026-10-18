@@ -87,6 +87,8 @@ class Park extends Phaser.Scene {
   trainPhase = 0;
   night!: Phaser.GameObjects.Rectangle;
   swans: { img: Phaser.GameObjects.Image; f: number; phase: number; speed: number }[] = [];
+  wheels: { wg: Phaser.GameObjects.Graphics; cars: Phaser.GameObjects.Rectangle[]; cx: number; cy: number; r: number }[] = [];
+  drops: { img: Phaser.GameObjects.Image; i: number; j: number; top: number; t: number }[] = [];
   glows: Phaser.GameObjects.Image[] = [];
   ground!: { rt: Phaser.GameObjects.RenderTexture; lo: { x: number; y: number }; S: number };
   sprites!: { deb: Phaser.GameObjects.Image; gary: Phaser.GameObjects.Image; me: Phaser.GameObjects.Image; brad: Phaser.GameObjects.Image;
@@ -155,6 +157,8 @@ class Park extends Phaser.Scene {
     this.lastFeed = -1;
     this.locLabels = {};
     this.cullables = [];
+    this.wheels = [];
+    this.drops = [];
     this.landLabels = [];
     this.cameras.main.setBackgroundColor("#2c4a2e");
     this.drawStatic();
@@ -169,6 +173,19 @@ class Park extends Phaser.Scene {
     this.bakePawns();
     this.buildNight();
     this.buildLagoon();
+    if (!this.textures.exists("dropring")) {
+      const g = this.make.graphics({}, false);
+      g.fillStyle(0x2c3e50, 1).fillEllipse(48, 16, 96, 30);
+      g.fillStyle(0xf1c40f, 1).fillEllipse(48, 12, 96, 26);
+      for (let k = 0; k < 8; k++) g.fillStyle(k % 2 ? 0xe74c3c : 0x3498db, 1).fillCircle(10 + k * 11, 14 + Math.sin((k / 7) * Math.PI) * 6, 4);
+      g.generateTexture("dropring", 96, 32);
+      g.destroy();
+    }
+    for (const l of LOCS) {
+      if (l.id !== "glitter" && l.id !== "meteor") continue;
+      const img = this.add.image(0, 0, "dropring").setDepth(l.i + l.j + 0.7);
+      this.drops.push({ img, i: l.i, j: l.j, top: l.h * 1.12, t: Math.random() * 10 });
+    }
     const sp = (key: string) => this.person(key.replace("p_", ""), key).setDepth(5001);
     this.sprites = {
       deb: sp("p_deb"), gary: sp("p_gary"), me: sp("p_me").setDepth(5002), brad: sp("p_brad"),
@@ -670,12 +687,16 @@ class Park extends Phaser.Scene {
     const r = 150;
     this.cullables.push({ obj: g, x0: c.x - r - 30, y0: c.y - r - 30, x1: c.x + r + 30, y1: base.y + 10 });
     g.lineStyle(10, 0x7f8c8d, 1).lineBetween(base.x - 60, base.y, c.x, c.y).lineBetween(base.x + 60, base.y, c.x, c.y);
-    g.lineStyle(8, 0xf39c12, 1).strokeCircle(c.x, c.y, r);
+    // The wheel turns (its own graphics, drawn around 0,0); gondolas hang level as it goes.
+    const wg = this.add.graphics().setPosition(c.x, c.y).setDepth(l.i + l.j + 0.55);
+    wg.lineStyle(8, 0xf39c12, 1).strokeCircle(0, 0, r);
     for (let k = 0; k < 12; k++) {
       const t = (k / 12) * Math.PI * 2;
-      g.lineStyle(3, 0xf5cba7, 1).lineBetween(c.x, c.y, c.x + Math.cos(t) * r, c.y + Math.sin(t) * r);
-      g.fillStyle([0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71][k % 4], 1).fillRoundedRect(c.x + Math.cos(t) * r - 14, c.y + Math.sin(t) * r, 28, 24, 5);
+      wg.lineStyle(3, 0xf5cba7, 1).lineBetween(0, 0, Math.cos(t) * r, Math.sin(t) * r);
     }
+    const cars = Array.from({ length: 12 }, (_, k) =>
+      this.add.rectangle(0, 0, 28, 24, [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71][k % 4]).setOrigin(0.5, 0).setDepth(l.i + l.j + 0.65));
+    this.wheels.push({ wg, cars, cx: c.x, cy: c.y, r });
   }
 
   doorPoint(l: LocDef) {
@@ -1402,6 +1423,23 @@ class Park extends Phaser.Scene {
       const cam = this.cameras.main, p = iso(s.w.pos.i, s.w.pos.j);
       const k = Math.min(1, dtMs / 250);
       cam.centerOn(cam.midPoint.x + (p.x - cam.midPoint.x) * k, cam.midPoint.y + (p.y - cam.midPoint.y) * k);
+    }
+    // Rides in motion (they stop when the ride is closed).
+    for (const wh of this.wheels) {
+      const spin = this.sim.isClosed("wheel") ? 0 : dtMs / 1000 * 0.12;
+      wh.wg.rotation += spin;
+      wh.cars.forEach((car, k) => {
+        const t = wh.wg.rotation + (k / 12) * Math.PI * 2;
+        car.setPosition(wh.cx + Math.cos(t) * wh.r, wh.cy + Math.sin(t) * wh.r);
+      });
+    }
+    for (const d of this.drops) {
+      const id = Math.abs(d.i - LOC.glitter.i) < 0.01 ? "glitter" : "meteor";
+      if (!this.sim.isClosed(id)) d.t = (d.t + dtMs / 1000) % 10;
+      // climb slowly (0-6s), hang (6-7.5s), DROP (7.5-8s), settle (8-10s)
+      const z = d.t < 6 ? 0.4 + (d.top - 0.4) * (d.t / 6) : d.t < 7.5 ? d.top : d.t < 8 ? d.top - (d.top - 0.4) * ((d.t - 7.5) / 0.5) ** 2 : 0.4;
+      const p = iso(d.i, d.j, z);
+      d.img.setPosition(p.x, p.y);
     }
     for (const sw of this.swans) {
       sw.phase += (dtMs / 1000) * sw.speed;
