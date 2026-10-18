@@ -56,6 +56,24 @@ meat served as the vegan option, barely any decorations.
   restroom near the 60-minute coaster line, or blocking a junction so they detour, are
   set-ups that pay off later.
 
+## v1.1: making it funny and readable
+
+- **Combos** (misery multipliers for chained set-ups): So Close!, Bladder Ambush,
+  Restroom Grand Tour, Scenic Route, Hangry, Customer Feedback Loop, Double Feature,
+  Déjà Vu, Drip Dry, Lasting Impression, Branson Bound, Nickel & Dimed, Thank You for
+  Your Patience. Listed as rumors in the briefing; call-outs pop on screen.
+- **One ★ signature move per land:** Main Street parade (blocks the street), Around the
+  World industrial teacups (queasy), Prehistoric jammed T-Rex (stuck mid-ride), Retro
+  Space timeshare presentation instead of the show, Future app crash (lines lost), Rave
+  one-song DJ loop (area misery), Ocean monsoon splash zone (soaked), plus the Scare Barn
+  surprise upcharge.
+- **Guest Relations** is the guests' escape valve: at low Patience they go complain once.
+  A fair hearing restores Patience *and* files a complaint (+10 suspicion). Get there first
+  and route complaints to "the old company."
+- Floating misery numbers, mood face and status icons over the group, line-progress bar.
+- Dialogue variants for every moment, and ambient park awfulness from real reviews.
+  See [docs/research.md](docs/research.md).
+
 ## Core loop (v0 proposal, superseded by v1 above where they differ)
 
 - One run = one park day, ~5 minutes of play, with Sims-style pause/speed controls.

@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { TOOL, TOOLS, TRAITS, ToolId } from "../sim/content";
+import { COMBOS, TOOL, TOOLS, TRAITS, ToolId } from "../sim/content";
 import { EDGES, LAKE, LANDS, LOC, LOCS, LocDef, NODES } from "../sim/park";
 import { ActionView, Sim, Target, fmtTime } from "../sim/sim";
 
@@ -22,6 +22,17 @@ let current: Park;
 let skipIntro = false; // "Another day" goes straight to the briefing
 
 let toastTimer = 0;
+let comboTimer = 0;
+function comboCallout(text: string) {
+  const el = $("combo");
+  el.textContent = text;
+  el.classList.remove("show");
+  void el.offsetWidth; // restart the pop animation
+  el.classList.add("show");
+  clearTimeout(comboTimer);
+  comboTimer = window.setTimeout(() => el.classList.remove("show"), 2200);
+}
+
 function toast(msg: string, ms = 2600) {
   const el = $("toast");
   el.textContent = msg;
@@ -253,6 +264,23 @@ class Park extends Phaser.Scene {
 
   // ------------------------------------------------------------ dynamic
 
+  floatText(text: string, color: string, big = false) {
+    const s = this.sim, zoom = this.cameras.main.zoom;
+    const c = iso(s.g.pos.i, s.g.pos.j);
+    const t = this.add.text(c.x + (Math.random() - 0.5) * 40, c.y - 150, text, {
+      fontFamily: "Trebuchet MS, Verdana, sans-serif", fontSize: big ? "52px" : "44px", color,
+      stroke: "#000000", strokeThickness: 8, fontStyle: "bold",
+    }).setOrigin(0.5, 1).setDepth(9000).setScale(Math.max(0.5, ((big ? 16 : 14) * DPR) / (44 * zoom)));
+    this.tweens.add({ targets: t, y: t.y - 160 / Math.max(zoom, 0.3) * 0.3, alpha: 0, duration: 1600, ease: "Cubic.easeOut", onComplete: () => t.destroy() });
+  }
+
+  drainFx() {
+    for (const f of this.sim.fx.splice(0)) {
+      if (f.type === "misery") this.floatText(f.text, "#ff6b5b");
+      else { this.floatText(f.text, "#ffd166", true); comboCallout(`COMBO! ${f.text}`); }
+    }
+  }
+
   icon(k: number, text: string, x: number, y: number, size = 56) {
     let t = this.icons[k];
     if (!t) {
@@ -323,10 +351,16 @@ class Park extends Phaser.Scene {
       const c = iso(s.g.pos.i, s.g.pos.j);
       if (this.sel?.kind === "guests") g.lineStyle(8, 0xffd166, 1).strokeEllipse(c.x, c.y, 150, 75);
       [[0xe84393, -16], [0xf39c12, 16]].forEach(([col, dx]) => this.pawn(g, c.x + dx, c.y + (dx > 0 ? 6 : -6), col));
+      k = this.icon(k, [s.mood(), ...s.statuses()].join(""), c.x, c.y - 104, 48);
+      if (ga.t === "queue") {
+        const pct = 1 - ga.left / ga.total;
+        g.fillStyle(0x000000, 0.6).fillRect(c.x - 50, c.y - 172, 100, 12);
+        g.fillStyle(pct > 0.6 ? 0xff6b5b : 0x7ec84a, 1).fillRect(c.x - 50, c.y - 172, 100 * pct, 12);
+      }
       const show = s.thoughtUntil > s.time && !!s.thought;
       this.bubble.setVisible(show);
       if (show) {
-        this.bubble.setText(s.thought).setPosition(c.x, c.y - 120)
+        this.bubble.setText(s.thought).setPosition(c.x, c.y - 190)
           .setScale(Math.max(0.5, (13 * DPR) / (40 * zoom)));
       }
     } else {
@@ -434,8 +468,8 @@ class Park extends Phaser.Scene {
       const time = `⏱ ${v.def.minutes} min`;
       const cost = v.susp === 0 ? "" : v.susp < 0 ? ` · Suspicion ${v.susp}` : ` · Suspicion +${v.susp}`;
       const walk = v.walk > 0.05 ? `🚶 ${Math.ceil(v.walk)} min walk, then ` : "";
-      html += `<button class="sab" data-act="${v.def.id}" ${v.why ? "disabled" : ""}>
-        <b>${esc(v.def.name)}</b><small>${esc(v.def.blurb)}</small>
+      html += `<button class="sab ${v.def.signature ? "sig" : ""}" data-act="${v.def.id}" ${v.why ? "disabled" : ""}>
+        <b>${v.def.signature ? "★ " : ""}${esc(v.def.name)}</b><small>${esc(v.def.blurb)}</small>
         <span class="cost">${v.why ? esc(v.why) : `${walk}${time}${cost}`}</span></button>`;
     }
     return html;
@@ -570,6 +604,8 @@ class Park extends Phaser.Scene {
         <div>${traits.map((t) => `<span class="tagline"><b>${t.label}</b> — ${t.blurb}</span>`).join(" ")}</div>
         <h2>Intel says they want to…</h2>
         <ul class="known">${known.map((w) => `<li>${esc(w.def.label)}</li>`).join("")}<li><i>…plus ${s.wishes.length - known.length} more things you'll have to overhear.</i></li></ul>
+        <details><summary><b>Rumored combos</b> (chain set-ups for bonus misery)</summary><ul class="known">${COMBOS.map((c) =>
+          `<li><b>${c.name}</b> ×${c.mult} — ${c.hint}</li>`).join("")}</ul><p><i>Every land also has one ★ signature move. Go find them.</i></p></details>
         <h2>Pick 3 tools for your shift</h2><div class="picks">${offer.map((t) =>
           `<button class="pick ${chosen.has(t.id) ? "on" : ""}" data-pick="${t.id}"><b>${t.icon} ${t.name}${t.charges ? ` ×${t.charges}` : ""}</b>${t.blurb}</button>`).join("")}</div>
         <button class="big" id="clockin" ${chosen.size !== 3 ? "disabled" : ""}>Clock in</button>`;
@@ -603,6 +639,7 @@ class Park extends Phaser.Scene {
       <h1>${title}</h1>
       <div class="scoreline">${r.score} misery</div>
       <div>${r.misery} raw · ${mult} · ${r.done}/${r.total} of their plans happened · duties ${r.duties}</div>
+      ${r.combos.length ? `<p><b>Combos:</b> ${r.combos.map((c) => `<span class="tagline">${esc(c)}</span>`).join(" ")}</p>` : ""}
       <p><b>Their review:</b> <span class="stars">${"★".repeat(r.stars)}${"☆".repeat(5 - r.stars)}</span></p>
       ${r.lines.map((l) => `<blockquote>${esc(l)}</blockquote>`).join("")}
       <p class="memo">${esc(r.memo)}</p>
@@ -630,6 +667,7 @@ class Park extends Phaser.Scene {
       this.running = false;
       window.setTimeout(() => this.showResults(), 1200);
     }
+    this.drainFx();
     if (this.camFollow) {
       const cam = this.cameras.main, p = iso(s.w.pos.i, s.w.pos.j);
       const k = Math.min(1, dtMs / 250);

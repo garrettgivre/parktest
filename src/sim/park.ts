@@ -6,7 +6,7 @@
 // and screen y = (i + j) * 32 as before. The front gate is at the bottom.
 
 export type LandId = "main" | "world" | "dino" | "space" | "future" | "rave" | "ocean";
-export type Kind = "gate" | "ride" | "food" | "restroom" | "shop" | "show";
+export type Kind = "gate" | "ride" | "food" | "restroom" | "shop" | "show" | "relations";
 
 export interface Land {
   id: LandId;
@@ -80,6 +80,7 @@ type L = [string, string, Kind, LandId, string, number, number, number, number, 
 const L_: L[] = [
   // Main Street
   ["gate", "Front Gate", "gate", "main", "G", 4.5, 75, 1.6, 1.6, 1.3, 0xc0392b],
+  ["relations", "Guest Relations", "relations", "main", "G", -4.5, 75, 1.6, 1.4, 1.1, 0x2980b9],
   ["depot", "Union Depot Emporium", "shop", "main", "M1", -6.5, 66, 3, 2, 1.4, 0x8e44ad],
   ["bbq", "Burnt End Barbecue", "food", "main", "M1", 6.5, 65, 2.4, 2, 1.2, 0x9c4f2a],
   ["soda", "Soda Fountain", "food", "main", "M2", -6, 58, 1.8, 1.8, 1.1, 0xe58fa0],

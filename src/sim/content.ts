@@ -22,11 +22,15 @@ export const TOOL: Record<ToolId, ToolDef> = Object.fromEntries(TOOLS.map((t) =>
 
 export type ActionId =
   | "scanner" | "close" | "slow" | "fryer" | "veg" | "clog" | "outoforder" | "mascot" | "reader"
-  | "wetfloor" | "survey" | "churro" | "voucher" | "radioclose" | "duty";
+  | "wetfloor" | "survey" | "churro" | "voucher" | "radioclose" | "duty"
+  | "parade" | "spin" | "jam" | "timeshare" | "appcrash" | "dj" | "splash"
+  | "oldowner" | "upcharge" | "lockers";
 
 export interface ActionDef {
   id: ActionId;
   kinds?: Kind[]; // location kinds it applies to (none = special)
+  locs?: string[]; // or: only these specific locations (land signature moves)
+  signature?: boolean;
   name: string;
   blurb: string;
   minutes: number; // your time
@@ -47,7 +51,37 @@ export const ACTIONS: ActionDef[] = [
   { id: "outoforder", kinds: ["restroom"], name: "Lock it: OUT OF ORDER", blurb: "Out of order for 60 min.", minutes: 1, susp: 6, cooldown: 120, duration: 60, tool: "keys" },
   { id: "mascot", kinds: ["show"], name: "Mascot no-show", blurb: "The star “calls in sick.” Cancels the next show here.", minutes: 5, susp: 15 },
   { id: "reader", kinds: ["shop"], name: "Card reader down", blurb: "Cash only for 60 min.", minutes: 3, susp: 5, cooldown: 120, duration: 60 },
+  { id: "oldowner", kinds: ["relations"], name: "Route complaints to \u201cthe old company\u201d", blurb: "For 2 hours, every complaint is the old owner's policy. They get a gift card for 20% of a souvenir cup.", minutes: 3, susp: 6, cooldown: 180, duration: 120 },
+  { id: "lockers", locs: ["rocket", "aero", "glitter", "leviathan"], name: "Enforce the locker policy", blurb: "For 90 min, lockers here bill by the minute. A long line costs them, and the bag comes out the wrong side.", minutes: 2, susp: 4, cooldown: 180, duration: 90 },
+  // One signature move per land.
+  { id: "upcharge", locs: ["barn"], signature: true, name: "Add a surprise upcharge", blurb: "For 2 hours the Scare Barn is $25 extra, \u201can exciting new evolution.\u201d They pay. They're furious.", minutes: 3, susp: 6, cooldown: 240, duration: 120 },
+  { id: "parade", locs: ["depot"], signature: true, name: "Call in the parade", blurb: "Four people and a golf cart block Main Street for 30 min. Nobody crosses.", minutes: 3, susp: 7, cooldown: 180, duration: 30 },
+  { id: "spin", locs: ["teacups"], signature: true, name: "Set the teacups to INDUSTRIAL", blurb: "For 60 min, any Around the World ride leaves them queasy: no appetite, sloshing misery.", minutes: 3, susp: 6, cooldown: 150, duration: 60 },
+  { id: "jam", locs: ["trex"], signature: true, name: "Jam the animatronic", blurb: "If they're ON T-Rex Trek, they're stuck inside with it roaring for 25 min. Otherwise it just breaks.", minutes: 2, susp: 10, cooldown: 150 },
+  { id: "timeshare", locs: ["starlight"], signature: true, name: "Swap in a timeshare presentation", blurb: "The next show is a 40-minute vacation-ownership pitch. They have to sit through it.", minutes: 5, susp: 12 },
+  { id: "appcrash", locs: ["aero"], signature: true, name: "Crash the virtual queue app", blurb: "Anyone in a Future Metropolis line loses their spot. Waits double for 60 min.", minutes: 4, susp: 10, cooldown: 180, duration: 60 },
+  { id: "dj", locs: ["mirrorball"], signature: true, name: "Tell the DJ to loop one song", blurb: "For 60 min, every minute they spend in Rave grinds their soul a little.", minutes: 2, susp: 5, cooldown: 150, duration: 60 },
+  { id: "splash", locs: ["leviathan"], signature: true, name: "Crank the splash zone", blurb: "For 60 min, riding or walking through Ocean soaks them. Soggy for 90 min after.", minutes: 3, susp: 6, cooldown: 150, duration: 60 },
 ];
+
+// Named combos: rewarded set-ups. Multipliers apply to misery only.
+export interface ComboDef { id: string; name: string; mult: number; hint: string }
+export const COMBOS: ComboDef[] = [
+  { id: "soclose", name: "So Close!", mult: 1.2, hint: "Close a ride when they're near the front." },
+  { id: "ambush", name: "Bladder Ambush", mult: 1.5, hint: "A slow line, then no restroom." },
+  { id: "tour", name: "Restroom Grand Tour", mult: 2, hint: "Two closed restrooms in a row." },
+  { id: "scenic", name: "Scenic Route", mult: 1.5, hint: "Make them detour… to something closed." },
+  { id: "hangry", name: "Hangry", mult: 1.5, hint: "Deny food to someone who's starving." },
+  { id: "feedback", name: "Customer Feedback Loop", mult: 1.5, hint: "A survey that makes them late for the show." },
+  { id: "double", name: "Double Feature", mult: 1.3, hint: "Ruin two of their plans within an hour." },
+  { id: "dejavu", name: "Déjà Vu", mult: 1.5, hint: "Ruin the same plan twice." },
+  { id: "drip", name: "Drip Dry", mult: 1.25, hint: "Anything bad, while they're soaked." },
+  { id: "lastcall", name: "Lasting Impression", mult: 1.3, hint: "Ruin something after 9 PM." },
+  { id: "branson", name: "Branson Bound", mult: 1.4, hint: "They sit through the whole timeshare pitch." },
+  { id: "nickel", name: "Nickel & Dimed", mult: 1.5, hint: "Charge them for things twice in one day." },
+  { id: "stonewall", name: "Thank You for Your Patience", mult: 1.5, hint: "Shut down their complaint." },
+];
+export const COMBO: Record<string, ComboDef> = Object.fromEntries(COMBOS.map((c) => [c.id, c]));
 export const ACTION: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]));
 
 export const SPECIAL: Record<"wetfloor" | "survey" | "churro" | "voucher" | "radioclose" | "duty", ActionDef> = {
@@ -149,3 +183,4 @@ export function dutyText(rng: () => number, place: string, by: string) {
     `Circling back. ${place}. ${task[0].toUpperCase() + task.slice(1)}. ${by}. Per my last radio.`,
   ]);
 }
+

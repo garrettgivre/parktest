@@ -3,8 +3,9 @@
 // worker commands (walkTo / doAction / setFollow) and reads the state.
 
 import {
-  ACTIONS, ActionDef, ActionId, SPECIAL, TOOL, ToolId, TraitId, WishDef, dutyText, makeDay,
+  ACTIONS, ActionDef, ActionId, COMBO, SPECIAL, TOOL, ToolId, TraitId, WishDef, dutyText, makeDay,
 } from "./content";
+import { AMBIENT, LINES } from "./lines";
 import { LOC, LOCS, LocDef, LandId, NODES, shortest } from "./park";
 
 export const OPEN = 10 * 60;
@@ -39,11 +40,20 @@ export interface LocState {
   showCancelled: boolean;
   scannerBroken: boolean;
   readyAt: Partial<Record<ActionId, number>>;
+  timeshare: boolean;
+  oldOwnerUntil: number;
+  upchargeUntil: number;
+  lockerUntil: number;
 }
+
+export interface Fx { type: "misery" | "combo"; text: string }
+
+const MONEY = ["reader", "upcharge", "locker"];
+const RUINS = ["complainBad", "closed", "closedFront", "show", "timeshare", "veg", "reader", "lateShow", "fryer", "app", "jam"];
 
 export interface Wish { def: WishDef; done: boolean; failed: boolean; revealed: boolean; fails: number; retryAt: number }
 
-type Purpose = "wish" | "ride" | "food" | "restroom" | "show" | "shop" | "exit" | "gate";
+type Purpose = "wish" | "ride" | "food" | "restroom" | "show" | "shop" | "exit" | "gate" | "complain";
 interface Goal { loc: string; purpose: Purpose; wish?: Wish }
 
 type Act =
@@ -94,6 +104,22 @@ export class Sim {
   ended: { why: EndReason; at: number } | null = null;
   churroReady = 0;
   slowSuffered = false;
+  fx: Fx[] = []; // UI drains: floating numbers and combo call-outs
+  combosHit: string[] = [];
+  paradeUntil = 0;
+  spinUntil = 0;
+  appDownUntil = 0;
+  djUntil = 0;
+  splashUntil = 0;
+  soakedUntil = 0;
+  queasyUntil = 0;
+  private paradeHit = false;
+  private djHit = false;
+  private slowQueueAt = -999;
+  private ruined: { time: number; id: string }[] = [];
+  private nextAmbient = OPEN + 40;
+  private complained = false;
+  private lockerHit = "";
   private hits: { time: number; reason: string }[] = [];
   private sabLog: number[] = [];
   private breakdowns: number[];
@@ -108,7 +134,8 @@ export class Sim {
     for (const def of LOCS) {
       this.locs[def.id] = {
         def, closedUntil: 0, closedBy: null, slowUntil: 0, vegSwap: false, readerUntil: 0,
-        showCancelled: false, scannerBroken: false, readyAt: {},
+        showCancelled: false, scannerBroken: false, readyAt: {}, timeshare: false,
+        oldOwnerUntil: 0, upchargeUntil: 0, lockerUntil: 0,
       };
     }
     const day = makeDay(this.rng);
@@ -144,7 +171,8 @@ export class Sim {
     const base = def.baseWait ?? 10;
     const h = this.time / 60;
     const crowd = 0.6 + 0.6 * Math.exp(-((h - 15) ** 2) / 8);
-    return Math.round(base * crowd * (this.isSlow(id) ? 2 : 1));
+    const app = def.land === "future" && this.appDownUntil > this.time ? 2 : 1;
+    return Math.round(base * crowd * (this.isSlow(id) ? 2 : 1) * app);
   }
 
   workerSpeed() { return WORKER_SPEED * (this.has("cart") ? 1.8 : 1); }
@@ -231,6 +259,16 @@ export class Sim {
     this.thoughtUntil = this.time + 14;
     this.note(text, kind);
   }
+  /** A random variant of a dialogue line. {A} speaks, {B} is the other one. */
+  private line(key: string, vars: Record<string, string | number> = {}, speaker?: string) {
+    const pool = LINES[key];
+    const a = speaker ?? (this.rng() < 0.5 ? "Deb" : "Gary");
+    const b = a === "Deb" ? "Gary" : "Deb";
+    let out = pool[Math.floor(this.rng() * pool.length)].replace(/\{A\}/g, a).replace(/\{B\}/g, b);
+    for (const [k, v] of Object.entries(vars)) out = out.replace(new RegExp(`\\{${k}\\}`, "g"), String(v));
+    return out;
+  }
+
   private note(text: string, kind: LogKind) { this.log.push({ time: this.time, text, kind }); }
   private who(w?: Wish) { return w?.def.who ?? (this.rng() < 0.5 ? "Deb" : "Gary"); }
   private between(a: number, b: number) { return a + this.rng() * (b - a); }
@@ -243,8 +281,20 @@ export class Sim {
   }
   private recent(times: number[], window = 90) { return times.filter((t) => this.time - t < window).length; }
 
-  private hurt(misery: number, patience: number, reason: string, yours = true) {
-    this.misery += misery;
+  private hurt(misery: number, patience: number, reason: string, yours = true, wish?: Wish) {
+    let mult = 1;
+    if (yours) {
+      for (const id of this.combosFor(reason, wish)) {
+        const c = COMBO[id];
+        mult *= c.mult;
+        this.combosHit.push(id);
+        this.fx.push({ type: "combo", text: `${c.name} \u00d7${c.mult}` });
+      }
+    }
+    if (wish && RUINS.includes(reason)) this.ruined.push({ time: this.time, id: wish.def.id });
+    const m = misery * mult;
+    this.misery += m;
+    if (m >= 1) this.fx.push({ type: "misery", text: `+${Math.round(m)}` });
     this.patience -= patience * PATIENCE_HIT;
     if (yours) {
       this.suspicion += 2 * this.recent(this.hits.filter((h) => !h.reason.startsWith("park:")).map((h) => h.time));
@@ -252,6 +302,54 @@ export class Sim {
     } else {
       this.hits.push({ time: this.time, reason: "park:" + reason });
     }
+  }
+
+  private combosFor(reason: string, wish?: Wish) {
+    const t = this.time;
+    const mine = (r: string, win: number) => this.hits.some((h) => h.reason === r && t - h.time < win);
+    const out: string[] = [];
+    if (reason === "closedFront") out.push("soclose");
+    if (reason === "restroom" && t - this.slowQueueAt < 90) out.push("ambush");
+    if (reason === "restroom" && mine("restroom", 45)) out.push("tour");
+    if ((reason === "closed" || reason === "closedFront") && mine("detour", 40)) out.push("scenic");
+    if (reason === "fryer" && this.hunger >= 85) out.push("hangry");
+    if (reason === "lateShow" && mine("survey", 45)) out.push("feedback");
+    if (wish && RUINS.includes(reason)) {
+      if (this.ruined.some((r) => r.id !== wish.def.id && t - r.time < 60)) out.push("double");
+      if (this.ruined.some((r) => r.id === wish.def.id)) out.push("dejavu");
+    }
+    if (this.soakedUntil > t && reason !== "soaked") out.push("drip");
+    if (t >= 21 * 60 && RUINS.includes(reason)) out.push("lastcall");
+    if (reason === "timeshare") out.push("branson");
+    if (MONEY.includes(reason) && this.hits.some((h) => MONEY.includes(h.reason) && h.reason !== reason)) out.push("nickel");
+    if (reason === "complainBad") out.push("stonewall");
+    return out;
+  }
+
+  guestLand() {
+    const a = this.g.act;
+    if ((a.t === "queue" || a.t === "busy") && a.loc) return LOC[a.loc].land;
+    return NODES[this.g.prev].land;
+  }
+
+  /** Little status icons for the group. */
+  statuses() {
+    const out: string[] = [];
+    if (this.soakedUntil > this.time) out.push("💦")
+    if (this.queasyUntil > this.time) out.push("🤢");
+    if (this.djUntil > this.time && this.guestLand() === "rave") out.push("🎵");
+    return out;
+  }
+
+  mood() {
+    return this.patience > 70 ? "😀" : this.patience > 45 ? "😐" : this.patience > 20 ? "😠" : "🤬";
+  }
+
+  private soak() {
+    if (this.soakedUntil > this.time) return;
+    this.soakedUntil = this.time + 90;
+    this.hurt(8, 4, "soaked");
+    this.say(this.line("soaked"), "bad", true);
   }
 
   private joy(misery: number, patience: number) {
@@ -282,7 +380,7 @@ export class Sim {
       const kind = this.locs[target.id].def.kind;
       if (this.duty?.loc === target.id) defs.push(SPECIAL.duty);
       for (const a of ACTIONS) {
-        if (!a.kinds?.includes(kind)) continue;
+        if (a.locs ? !a.locs.includes(target.id) : !a.kinds?.includes(kind)) continue;
         if (a.tool && !(a.tool in this.tools)) continue;
         if (a.withoutTool && a.withoutTool in this.tools) continue;
         defs.push(a);
@@ -347,6 +445,18 @@ export class Sim {
         return (l.def.shows ?? []).some((s) => s > this.time) ? null : "No more shows today";
       case "duty":
         return this.duty?.loc === t.id ? null : "No duty here";
+      case "parade": return this.paradeUntil > this.time ? "Parade's already going" : null;
+      case "oldowner": return l.oldOwnerUntil > this.time ? "Already briefed" : null;
+      case "upcharge": return l.upchargeUntil > this.time ? "Already upcharged" : null;
+      case "lockers": return l.lockerUntil > this.time ? "Already enforced" : null;
+      case "spin": return this.spinUntil > this.time ? "Already cranked" : null;
+      case "appcrash": return this.appDownUntil > this.time ? "App's already down" : null;
+      case "dj": return this.djUntil > this.time ? "Already looping" : null;
+      case "splash": return this.splashUntil > this.time ? "Already cranked" : null;
+      case "jam": return this.isClosed("trex") ? "Already closed" : null;
+      case "timeshare":
+        if (l.timeshare) return "Already booked";
+        return (l.def.shows ?? []).some((x) => x > this.time) ? null : "No more shows today";
     }
     return null;
   }
@@ -397,7 +507,7 @@ export class Sim {
     if (def.id === "survey") {
       this.g.route = [];
       this.g.act = { t: "busy", loc: null, left: 15, what: "Trapped in a “quick survey”" };
-      this.say(`Gary: "I—sure. Quick, right?"`, "guest", true);
+      this.say(this.line("surveyStart"), "guest", true);
     }
   }
 
@@ -414,15 +524,15 @@ export class Sim {
       if (a.id === "churro") {
         this.churroReady = this.time + (a.cooldown ?? 90);
         this.joy(0, 6);
-        this.say(`Deb: "Oh! A free churro. Thank you, sweetie."`, "good", true);
+        this.say(this.line("churro"), "good", true);
       } else if (a.id === "voucher") {
         this.joy(5, 15);
         const g = this.g.act;
         if (g.t === "queue") g.left = Math.min(g.left, 2);
-        this.say(`Gary: "A free FastPass? Okay, this place isn't ALL bad."`, "good", true);
+        this.say(this.line("voucher"), "good", true);
       } else if (a.id === "survey") {
         this.hurt(5, 3, "survey");
-        this.say(`Deb: "That was NOT a quick survey."`, "bad", true);
+        this.say(this.line("surveyEnd"), "bad", true);
       }
       return;
     }
@@ -476,6 +586,66 @@ export class Sim {
         l.readerUntil = until;
         this.note(`${name} card reader unplugged. Cash only.`, "you");
         return;
+      case "oldowner":
+        l.oldOwnerUntil = until;
+        this.note("Guest Relations has been briefed: everything is the old company's policy.", "you");
+        return;
+      case "upcharge":
+        l.upchargeUntil = until;
+        this.note("Scare Barn now costs $25 extra. Signage calls it \u201can exciting new evolution.\u201d", "you");
+        return;
+      case "lockers":
+        l.lockerUntil = until;
+        this.note(`Lockers at ${name} now bill by the minute. Loose articles are \u201cnot permitted.\u201d`, "you");
+        return;
+      case "parade":
+        this.paradeUntil = until;
+        this.paradeHit = false;
+        this.note("The parade begins: four people and a golf cart. Main Street is blocked for 30 min.", "you");
+        return;
+      case "spin":
+        this.spinUntil = until;
+        this.note("The teacups are now set to INDUSTRIAL. So is every ride in Around the World, somehow.", "you");
+        return;
+      case "jam": {
+        const g = this.g.act;
+        if (g.t === "busy" && g.loc === "trex") {
+          g.left += 25;
+          g.what = "Stuck inside T-Rex Trek. It's roaring. It won't stop.";
+          this.hurt(18, 8, "jam", true, this.wish("trex"));
+          this.say(this.line("jam"), "bad", true);
+        } else {
+          this.note("T-Rex Trek's animatronic is \u201cjammed.\u201d", "you");
+          this.closeLoc("trex", this.time + 45, "you");
+        }
+        return;
+      }
+      case "timeshare":
+        l.timeshare = true;
+        this.note("Next Starlight Theater show replaced with an exciting vacation-ownership opportunity.", "you");
+        return;
+      case "appcrash": {
+        this.appDownUntil = until;
+        this.note("The FunPass app is down. \u201cWe're aware of the issue.\u201d", "you");
+        const g = this.g.act;
+        if (g.t === "queue" && LOC[g.loc].land === "future") {
+          const progress = 1 - g.left / g.total;
+          this.hurt((5 + 25 * progress) * (g.wish?.def.weight ?? REPEAT_WEIGHT), 4 + 12 * progress, "app", true, g.wish);
+          g.total = this.currentWait(g.loc);
+          g.left = g.total;
+          this.say(this.line("app"), "bad", true);
+        }
+        return;
+      }
+      case "dj":
+        this.djUntil = until;
+        this.djHit = false;
+        this.note("DJ instructed to play \u201cGlitter Drop (Extended Mix)\u201d until further notice.", "you");
+        return;
+      case "splash":
+        this.splashUntil = until;
+        this.note("Splash zone set to \u201cmonsoon.\u201d", "you");
+        return;
     }
   }
 
@@ -488,15 +658,15 @@ export class Sim {
       const progress = 1 - a.left / a.total;
       const weight = a.wish?.def.weight ?? REPEAT_WEIGHT;
       const front = progress > 0.6;
-      this.hurt((10 + 35 * progress) * weight, 6 + 20 * progress, front ? "closedFront" : "closed", by === "you");
+      this.hurt((10 + 35 * progress) * weight, 6 + 20 * progress, front ? "closedFront" : "closed", by === "you", a.wish);
       this.say(front
-        ? `${this.who(a.wish)}: "We were RIGHT THERE. ${Math.round(a.total - a.left)} minutes!"`
-        : `${this.who(a.wish)}: "It's closing? We just got in line."`, "bad", true);
+        ? this.line("closedFront", { min: Math.round(a.total - a.left) }, a.wish?.def.who)
+        : this.line("closedEarly", {}, a.wish?.def.who), "bad", true);
       if (a.wish) this.failWish(a.wish);
       this.decide();
     } else if (a.t === "busy" && a.loc === id && l.def.kind === "food") {
       this.hurt(8, 8, "fryer", by === "you");
-      this.say(`Deb: "They're kicking us out mid-bite?"`, "bad", true);
+      this.say(this.line("foodKicked"), "bad", true);
       this.decide();
     }
   }
@@ -514,7 +684,7 @@ export class Sim {
   private mimed() {
     this.hurt(10, 8, "scanner");
     this.g.act = { t: "busy", loc: "gate", left: 30, what: "Being mimed at by the ticket guy" };
-    this.say(`Gary: "Did it… beep? Is that a yes?"`, "bad", true);
+    this.say(this.line("mimed"), "bad", true);
   }
 
   // ------------------------------------------------------------- guest AI
@@ -541,9 +711,15 @@ export class Sim {
     if (this.leaving || this.patience <= 0 || t >= CLOSE - 25) {
       if (!this.leaving) {
         this.leaving = true;
-        if (this.patience <= 0) this.say(`Deb: "That's it. We're going home."`, "bad", true);
+        if (this.patience <= 0) this.say(this.line("leaving"), "bad", true);
       }
       return this.goTo({ loc: "gate", purpose: "exit" });
+    }
+    if (!this.complained && this.patience < 30 && t < CLOSE - 60) {
+      this.complained = true;
+      this.say(this.line("complainGo"), "bad", true);
+      this.pauses.push("They're heading to Guest Relations to complain!");
+      return this.goTo({ loc: "relations", purpose: "complain" });
     }
     const merch = this.wish("merch");
     if (this.open(merch) && t >= 20 * 60 + 45) return this.announce(merch, "shop");
@@ -557,11 +733,11 @@ export class Sim {
     if (this.bladder >= bladderMax) {
       const wc = this.nearest("restroom");
       if (wc) {
-        this.say(`Gary: "I gotta find a bathroom."`);
+        this.say(this.line("needRestroom", {}, this.trait("bladder") ? "Gary" : undefined));
         return this.goTo({ loc: wc.id, purpose: "restroom" });
       }
     }
-    if (this.hunger >= 65) {
+    if (this.hunger >= 65 && this.queasyUntil <= t) {
       const lunch = this.wish("lunch");
       if (this.open(lunch) && lunch.retryAt <= t) return this.announce(lunch, "food");
       const f = this.nearest("food");
@@ -578,7 +754,7 @@ export class Sim {
         .map((l) => ({ l, d: this.pathLen(l.id) })).sort((a, b) => a.d - b.d).slice(0, 4);
       if (near.length) {
         const l = near[Math.floor(this.rng() * near.length)].l;
-        this.say(`${this.who()}: "${l.name}? Why not."`);
+        this.say(this.line("reride", { name: l.name }));
         return this.goTo({ loc: l.id, purpose: "ride" });
       }
     }
@@ -605,26 +781,47 @@ export class Sim {
         if (l.scannerBroken) return this.mimed();
         this.g.act = { t: "busy", loc: "gate", left: 5, what: "Getting tickets scanned" };
         return;
+      case "complain":
+        if (l.oldOwnerUntil > this.time) {
+          this.hurt(14, 0, "complainBad");
+          this.joy(0, 4);
+          this.say(this.line("complainBad"), "bad", true);
+        } else {
+          this.joy(3, 14);
+          this.suspicion += 10;
+          this.say(this.line("complainOk"), "good", true);
+          this.note("A complaint was filed. Management will be \u201clooking into it.\u201d (Suspicion +10)", "boss");
+        }
+        this.g.act = { t: "busy", loc: "relations", left: 10, what: "Talking to Guest Relations" };
+        return;
       case "exit":
         this.g.act = { t: "gone" };
         this.end(this.time >= CLOSE - 25 ? "closed" : "left");
         return;
       case "wish": case "ride": {
         if (this.isClosed(l.def.id)) {
-          this.hurt(12 * (w?.def.weight ?? REPEAT_WEIGHT), 10, "closed", yours);
-          this.say(`${this.who(w)}: "Closed?! We walked all the way here."`, "bad", true);
+          this.hurt(12 * (w?.def.weight ?? REPEAT_WEIGHT), 10, "closed", yours, w);
+          this.say(this.line("closedArrive", {}, w?.def.who), "bad", true);
           if (w) this.failWish(w);
           return this.decide();
         }
+        if (l.upchargeUntil > this.time) {
+          this.hurt(14 * (w?.def.weight ?? REPEAT_WEIGHT), 8, "upcharge", true, w);
+          this.say(this.line("upcharge"), "bad", true);
+        }
+        if (l.lockerUntil > this.time) {
+          this.hurt(4, 2, "locker", true, w);
+          this.say(this.line("locker"), "bad", true);
+        }
         const wait = this.currentWait(l.def.id);
         this.g.act = { t: "queue", loc: l.def.id, total: wait, left: wait, wish: w };
-        if (wait >= 50) this.say(`Gary: "${wait} minutes?! …Fine."`);
+        if (wait >= 50) this.say(this.line("longWait", { min: wait }));
         return;
       }
       case "food":
         if (this.isClosed(l.def.id)) {
-          this.hurt(8 + this.hunger / 10, 10, "fryer", yours);
-          this.say(`Deb: "Closed? I'm going to eat my own arm."`, "bad", true);
+          this.hurt(8 + this.hunger / 10, 10, "fryer", yours, w);
+          this.say(this.line("foodClosed"), "bad", true);
           this.closedSeen[l.def.id] = l.closedUntil;
           if (w) w.retryAt = this.time + 60;
           return this.decide();
@@ -636,11 +833,11 @@ export class Sim {
           this.closedSeen[l.def.id] = l.closedUntil;
           this.hurt(6 + this.bladder / 8, 8, "restroom", yours);
           if (this.bladder >= 95) {
-            this.say(`Gary: "I am going behind that dumpster. Don't look."`, "bad", true);
+            this.say(this.line("dumpster"), "bad", true);
             this.hurt(15, 15, "restroom", yours);
             this.bladder = 0;
           } else {
-            this.say(`Gary: "OUT OF ORDER?! Where's the next one?"`, "bad", true);
+            this.say(this.line("restroomClosed"), "bad", true);
           }
           return this.decide();
         }
@@ -649,8 +846,8 @@ export class Sim {
       case "show": {
         const st = w!.def.showTime!;
         if (this.time > st) {
-          this.hurt(20 * w!.def.weight, 14, "lateShow");
-          this.say(`Deb: "It already STARTED? They won't let us in?!"`, "bad", true);
+          this.hurt(20 * w!.def.weight, 14, "lateShow", true, w);
+          this.say(this.line("lateShow", {}, w!.def.who), "bad", true);
           w!.failed = true;
           return this.decide();
         }
@@ -659,14 +856,14 @@ export class Sim {
       }
       case "shop":
         if (l.readerUntil > this.time) {
-          this.hurt(12 * w!.def.weight, 6, "reader");
-          this.say(`Gary: "Cash only? Who carries cash?"`, "bad", true);
+          this.hurt(12 * w!.def.weight, 6, "reader", true, w);
+          this.say(this.line("cashOnly"), "bad", true);
           w!.failed = true;
           return this.decide();
         }
         this.g.act = {
           t: "busy", loc: l.def.id, left: 15, what: "Buying matching hoodies",
-          done: () => { w!.done = true; this.joy(6, 6); this.say(`Deb: "We look SO cute."`, "good"); },
+          done: () => { w!.done = true; this.joy(6, 6); this.say(this.line("merchDone"), "good"); },
         };
         return;
     }
@@ -675,14 +872,27 @@ export class Sim {
   private startShow(w: Wish) {
     const l = this.locs[w.def.loc];
     if (l.showCancelled) {
-      this.hurt(28 * w.def.weight, 18, "show");
-      this.say(`Deb: "Cancelled? We waited out here for nothing!"`, "bad", true);
+      this.hurt(28 * w.def.weight, 18, "show", true, w);
+      this.say(this.line("showCancelled", {}, w.def.who), "bad", true);
       w.failed = true;
       return this.decide();
     }
+    if (l.timeshare) {
+      l.timeshare = false;
+      this.say(this.line("timeshareStart"), "bad", true);
+      this.g.act = {
+        t: "busy", loc: l.def.id, left: 40, what: "Sitting through a timeshare presentation",
+        done: () => {
+          w.failed = true;
+          this.hurt(22 * w.def.weight, 12, "timeshare", true, w);
+          this.say(this.line("timeshareEnd"), "bad", true);
+        },
+      };
+      return;
+    }
     this.g.act = {
       t: "busy", loc: l.def.id, left: 40, what: `Watching the ${l.def.showName}`,
-      done: () => { w.done = true; this.joy(10, 10); this.say(`Deb: "That was a NATIONAL TREASURE."`, "good"); },
+      done: () => { w.done = true; this.joy(10, 10); this.say(this.line("showDone", {}, w.def.who), "good"); },
     };
   }
 
@@ -698,17 +908,17 @@ export class Sim {
           this.bladder += 15;
           if (lunch && this.trait("vegan") && l.vegSwap) {
             l.vegSwap = false;
-            this.hurt(25 * lunch.def.weight, 15, "veg");
-            this.say(`Deb: "Why does my vegan burger have a BONE in it?"`, "bad", true);
+            this.hurt(25 * lunch.def.weight, 15, "veg", true, lunch);
+            this.say(this.line("veg"), "bad", true);
             lunch.failed = true;
             lunch.revealed = true;
           } else if (lunch) {
             lunch.done = true;
             this.joy(5, 6);
-            this.say(`Deb: "Huh. It's actually not bad."`, "good");
+            this.say(this.line("lunchOk", {}, lunch.def.who), "good");
           } else {
             this.hurt(3, 2, "food", false);
-            this.say(`Gary: "This corn dog is cold in the middle."`);
+            this.say(this.line("foodBad"));
           }
         },
       };
@@ -718,8 +928,14 @@ export class Sim {
       t: "busy", loc: a.loc, left: def.rideMin ?? 5, what: `Riding ${def.name}`,
       done: () => {
         this.lastRide = a.loc;
+        if (def.wet && this.splashUntil > this.time) this.soak();
+        if (def.land === "world" && this.spinUntil > this.time && this.queasyUntil <= this.time) {
+          this.queasyUntil = this.time + 60;
+          this.hurt(6, 4, "queasy");
+          this.say(this.line("queasy"), "bad", true);
+        }
         if (a.wish) { a.wish.done = true; this.joy(6, 8); } else this.joy(3, 4);
-        this.say(`${this.who(a.wish)}: "WOOO! Again!"`, "good");
+        this.say(this.line("rideDone", {}, a.wish?.def.who), "good");
       },
     };
   }
@@ -756,6 +972,23 @@ export class Sim {
       }
     }
     this.tickDuty();
+    if (this.g.act.t !== "gone" && this.time >= OPEN) {
+      if (this.soakedUntil > this.time) { this.misery += 0.06 * dt; this.patience -= 0.03 * dt; }
+      if (this.queasyUntil > this.time) this.misery += 0.05 * dt;
+      if (this.djUntil > this.time && this.guestLand() === "rave") {
+        this.misery += 0.25 * dt;
+        this.patience -= 0.06 * dt;
+        if (!this.djHit) {
+          this.djHit = true;
+          this.hits.push({ time: this.time, reason: "dj" });
+          this.say(this.line("dj"), "bad", true);
+        }
+      }
+    }
+    if (this.time >= this.nextAmbient) {
+      this.nextAmbient = this.time + this.between(45, 75);
+      this.note(AMBIENT[Math.floor(this.rng() * AMBIENT.length)], "park");
+    }
 
     if (this.suspicion >= 100) {
       this.suspicion = 100;
@@ -795,16 +1028,30 @@ export class Sim {
         if (g.route.some((n, k) => k < g.route.length - 1 && blocked.has(n))) {
           this.routeTo(g, LOC[a.goal.loc].node, blocked);
           this.hurt(1, 1, "detour");
-          this.say(`Deb: "Wet floor? Again? We have to go AROUND."`, "bad", true);
+          this.say(this.line("detour"), "bad", true);
         }
         this.patience -= 0.015 * dt;
-        if (this.move(g, GUEST_SPEED, dt)) this.arrive(a.goal);
+        const main = (n?: string) => n === "M1" || n === "M2";
+        if (this.paradeUntil > this.time && (main(g.route[0]) || (main(g.prev) && g.route.length))) {
+          if (!this.paradeHit) {
+            this.paradeHit = true;
+            this.hurt(6, 4, "parade");
+            this.say(this.line("parade"), "bad", true);
+          }
+          break;
+        }
+        const before = g.prev;
+        const arrived = this.move(g, GUEST_SPEED, dt);
+        if (g.prev !== before && NODES[g.prev].land === "ocean" && this.splashUntil > this.time) this.soak();
+        if (arrived) this.arrive(a.goal);
         break;
       }
       case "queue": {
         a.left -= dt * (this.isSlow(a.loc) ? 0.5 : 1);
         this.patience -= (this.trait("impatient") ? 0.065 : 0.045) * dt;
+        if (this.locs[a.loc].lockerUntil > this.time) this.misery += 0.15 * dt; // the meter is running
         if (this.isSlow(a.loc)) {
+          this.slowQueueAt = this.time;
           this.misery += 0.12 * dt;
           this.patience -= 0.04 * dt;
           this.slowSuffered = true;
@@ -872,6 +1119,16 @@ export class Sim {
     add("detour", "Wet Floor signs everywhere. It hasn't rained in weeks.");
     add("reader", "Gift shop was cash only. In this economy.");
     add("scanner", "Staff pretended to scan our tickets. Like, mimed it.");
+    add("parade", "Got trapped behind a \u201cparade.\u201d It was four people and a golf cart.");
+    add("queasy", "The teacups were set to something illegal. My wife couldn't eat for an hour.");
+    add("jam", "Stuck on T-Rex Trek for 25 minutes while it roared at us. My kids are in therapy. We don't have kids.");
+    add("timeshare", "The \u201cshow\u201d was a timeshare pitch. We own part of a condo in Branson now.");
+    add("app", "Their app erased us from a line we were physically standing in.");
+    add("dj", "The Rave area played ONE song. For an hour. I can still hear it.");
+    add("upcharge", "They charged us EXTRA for the haunted barn. We have season passes.");
+    add("locker", "The locker charged by the minute because THEIR line was slow.");
+    add("complainBad", "Guest Relations said it was the old company's policy. Which old company?!");
+    add("soaked", "Got soaked walking PAST the lagoon. Walking. Past it.");
     if (this.slowSuffered) lines.push("The lines did not move. I aged.");
     if (!lines.length) lines.push("Honestly? Kind of a nice day. Lines were long, I guess.");
     const stars = Math.max(1, 5 - Math.floor(this.misery / 40));
@@ -884,6 +1141,7 @@ export class Sim {
     return {
       why, mult, score, misery: Math.round(this.misery), stars, lines, done, total: this.wishes.length, memo,
       duties: `${this.dutiesDone} done, ${this.dutiesMissed} skipped`,
+      combos: [...new Set(this.combosHit)].map((id) => COMBO[id].name),
     };
   }
 }
