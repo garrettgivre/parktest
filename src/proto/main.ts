@@ -6,7 +6,7 @@ import { Sim, fmtTime } from "../sim/sim";
 
 const HALF = 64; // half a tile's screen width
 const ZPX = 78; // screen px per tile of height
-const GAME_MIN_PER_SEC = 3; // at 1x speed a 12-hour day lasts ~4 minutes
+const GAME_MIN_PER_SEC = 1.5; // at 1x speed a 12-hour day lasts ~8 minutes
 
 const $ = (id: string) => document.getElementById(id)!;
 const iso = (i: number, j: number, z = 0) => ({ x: (i - j) * HALF, y: (i + j) * (HALF / 2) - z * ZPX });
