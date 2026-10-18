@@ -193,6 +193,17 @@ class Park extends Phaser.Scene {
       const cars = cols.map((c) => this.add.ellipse(0, 0, 22, 14, c).setStrokeStyle(2, 0x000000, 0.5).setDepth(l.i + l.j + 0.6));
       this.spinners.push({ id: l.id, cars, i: l.i, j: l.j, r: Math.min(l.w, l.d) * 0.42, z: sp[0], a: 0, speed: sp[1] });
     }
+    // Fountain Circle's fountain doesn't work. Well, it dribbles. Occasionally.
+    const ft = LANDMARKS.find((m) => m.icon === "⛲");
+    if (ft) {
+      const fi = (ft.u + ft.v) / 2, fj = (ft.v - ft.u) / 2;
+      const top = iso(fi, fj, 1.15), base = iso(fi, fj, 0.32);
+      const drip = this.add.ellipse(top.x, top.y, 7, 11, 0x8fd3ff).setDepth(fi + fj + 0.8).setAlpha(0);
+      this.tweens.add({
+        targets: drip, y: { from: top.y, to: base.y }, alpha: { from: 0.9, to: 0.6 }, duration: 700, ease: "Quad.easeIn",
+        repeat: -1, repeatDelay: 3200, onRepeat: () => drip.setAlpha(0.9),
+      });
+    }
     // Cloud shadows drifting over the park (the "glow" texture, darkened).
     const lo2 = uv(-95, -45), hi2 = uv(95, LOT_V + 22);
     this.clouds = [0, 1, 2, 3, 4].map((k) =>
