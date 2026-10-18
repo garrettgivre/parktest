@@ -33,7 +33,7 @@ const SHIRTS = [0xe74c3c, 0x3498db, 0x9b59b6, 0x1abc9c, 0xf1c40f, 0xe67e22, 0xec
 const HALF = 64; // half a tile's screen width
 const ZPX = 78; // screen px per tile of height
 const GAME_MIN_PER_SEC = 1.5; // 1x: a 12-hour day lasts 8 minutes
-const DPR = Math.min(window.devicePixelRatio || 1, 3);
+const DPR = Math.min(window.devicePixelRatio || 1, 2); // 3x phones: 2x is plenty and far cheaper to fill
 
 const $ = (id: string) => document.getElementById(id)!;
 const iso = (i: number, j: number, z = 0) => ({ x: (i - j) * HALF, y: (i + j) * (HALF / 2) - z * ZPX });
@@ -84,6 +84,9 @@ class Park extends Phaser.Scene {
   locLabels: Record<string, Phaser.GameObjects.Text> = {};
   landLabels: Phaser.GameObjects.Text[] = [];
   trainPhase = 0;
+  ground!: { rt: Phaser.GameObjects.RenderTexture; lo: { x: number; y: number }; S: number };
+  sprites!: { deb: Phaser.GameObjects.Image; gary: Phaser.GameObjects.Image; me: Phaser.GameObjects.Image; brad: Phaser.GameObjects.Image;
+    cars: Phaser.GameObjects.Image[]; gondolas: Phaser.GameObjects.Image[] };
   skyPhase = 0;
   bubble!: Phaser.GameObjects.Text;
   icons!: Phaser.GameObjects.Text[];
@@ -92,7 +95,12 @@ class Park extends Phaser.Scene {
   lastHud = "";
   pinch: { d: number; zoom: number } | null = null;
   camFollow = true; // camera tracks you until you drag the map
-  crowd: { pos: { i: number; j: number }; route: string[]; prev: string; color: number }[] = [];
+  crowd: { pos: { i: number; j: number }; route: string[]; prev: string; color: number; img: Phaser.GameObjects.Image }[] = [];
+  lineImgs: Record<string, Phaser.GameObjects.Image[]> = {};
+  // Static things that are only drawn while near the camera (big win on phones).
+  cullables: { obj: { setVisible(v: boolean): unknown }; x0: number; y0: number; x1: number; y1: number }[] = [];
+  cullAt = 0;
+  linesAt = 0;
   tipQueue: string[] = [];
   tipAt = 0;
   lastSky = "";
@@ -107,6 +115,7 @@ class Park extends Phaser.Scene {
     this.lastSide = this.lastHud = "";
     this.lastFeed = -1;
     this.locLabels = {};
+    this.cullables = [];
     this.landLabels = [];
     this.cameras.main.setBackgroundColor("#2c4a2e");
     this.drawStatic();
@@ -118,11 +127,30 @@ class Park extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(8000).setVisible(false);
 
     this.setupCamera();
+    this.bakePawns();
+    const sp = (key: string) => this.add.image(0, 0, key).setOrigin(0.5, 102 / 110).setDepth(5001);
+    this.sprites = {
+      deb: sp("p_deb"), gary: sp("p_gary"), me: sp("p_me").setDepth(5002), brad: sp("p_brad"),
+      cars: [0, 1, 2, 3].map((c) => this.add.image(0, 0, c === 0 ? "car0" : "car1").setOrigin(0.5, 1).setDepth(4995)),
+      gondolas: [0, 1, 2, 3, 4, 5].map(() => this.add.image(0, 0, "gon0").setOrigin(0.5, 0).setDepth(4001)),
+    };
     const ids = Object.keys(NODES).filter((id) => !/^t\d+$/.test(id) && id !== "lot");
     this.crowd = Array.from({ length: CROWD }, (_, k) => {
       const n = NODES[ids[k % ids.length]];
-      return { pos: { i: n.i + Math.random() - 0.5, j: n.j + Math.random() - 0.5 }, route: [], prev: n.id, color: SHIRTS[k % SHIRTS.length] };
+      const img = this.add.image(0, 0, "pawn" + (k % SHIRTS.length)).setOrigin(0.5, 1).setDepth(4990);
+      return { pos: { i: n.i + Math.random() - 0.5, j: n.j + Math.random() - 0.5 }, route: [], prev: n.id, color: SHIRTS[k % SHIRTS.length], img };
     });
+    // Queue people at each ride, placed once along the path to its door.
+    this.lineImgs = {};
+    for (const l of LOCS) {
+      if (l.kind !== "ride") continue;
+      const a = NODES[l.node], b = this.doorPoint(l);
+      this.lineImgs[l.id] = Array.from({ length: 9 }, (_, q) => {
+        const t = 0.15 + (q / 10) * 0.8;
+        const p = iso(a.i + (b.i - a.i) * t + (q % 2) * 0.12, a.j + (b.j - a.j) * t - (q % 2) * 0.12);
+        return this.add.image(p.x, p.y, "qpawn" + ((q * 3 + l.id.length) % SHIRTS.length)).setOrigin(0.5, 1).setDepth(4989).setVisible(false);
+      });
+    }
     this.autoPause = store.get("park.autopause") !== "0";
     if (!wired) this.wireDom();
     this.setSpeed(1);
@@ -295,6 +323,8 @@ class Park extends Phaser.Scene {
       paths.fillStyle(0xd9ccb4, 1).fillEllipse(q.x, q.y, 120, 60);
     }
 
+    this.bakeIntoGround(plaza);
+    this.bakeIntoGround(paths);
     this.drawTrees();
 
     // Sky Buckets cable, strung high over the lagoon.
@@ -394,6 +424,7 @@ class Park extends Phaser.Scene {
     }
     const rt = this.add.renderTexture(lo.x, lo.y, W, H).setOrigin(0, 0).setScale(1 / S).setDepth(-100);
     rt.draw(gg);
+    this.ground = { rt, lo, S };
     gg.destroy();
   }
 
@@ -412,7 +443,17 @@ class Park extends Phaser.Scene {
       ...DECOR.map((d) => ({ i: (d.u + d.v) / 2, j: (d.v - d.u) / 2, r: Math.max(d.w, d.d) / 2 + 0.8 })),
       ...LANDMARKS.map((m) => ({ i: (m.u + m.v) / 2, j: (m.v - m.u) / 2, r: 1.2 }))];
     const hash = (n: number) => { const x = Math.sin(n * 91.7) * 43758.5453; return x - Math.floor(x); };
-    const g = this.add.graphics().setDepth(-50);
+    const TW = 140, TH = 170; // tree texture size; trees are drawn with their base at (TW/2, TH-14)
+    const styles = ["palm", "pine", "round0", "round1"];
+    for (const st of styles) {
+      if (this.textures.exists("tree_" + st)) continue;
+      const tg = this.make.graphics({}, false);
+      this.tree(tg, { x: TW / 2, y: TH - 14 }, st.startsWith("round") ? "round" : st, st === "round1" ? 0.9 : 0.2);
+      tg.generateTexture("tree_" + st, TW, TH);
+      tg.destroy();
+    }
+    const blit: Record<string, Phaser.GameObjects.Blitter> = {};
+    for (const st of styles) blit[st] = this.add.blitter(0, 0, "tree_" + st).setDepth(-50);
     let n = 0;
     for (let u = -92; u <= 92; u += 2.4) {
       for (let v = -42; v <= LOT_V + 18; v += 2.4) {
@@ -432,7 +473,10 @@ class Park extends Phaser.Scene {
         const zone = r > R * 1.95 ? null : zoneAtAngle(deg);
         const style = zone && ["lagoon", "foam", "ozark", "y2k"].includes(zone) ? "palm"
           : zone && ["bonewars", "ozark", "extinction"].includes(zone) ? "pine" : "round";
-        this.tree(g, iso(i, j), style, hash(n + 0.75));
+        const q = iso(i, j);
+        const key = style === "round" ? (hash(n + 0.75) > 0.5 ? "round1" : "round0") : style;
+        const bob = blit[key].create(q.x - TW / 2, q.y - (TH - 14));
+        this.cullables.push({ obj: bob, x0: q.x - TW / 2, y0: q.y - TH, x1: q.x + TW / 2, y1: q.y + 14 });
       }
     }
   }
@@ -477,6 +521,8 @@ class Park extends Phaser.Scene {
       const top = iso(i, j, Math.max(0.3, z)), ground = iso(i, j);
       pts.push({ x: top.x, y: top.y, gx: ground.x, gy: ground.y });
     }
+    const xs = pts.flatMap((q) => [q.x, q.gx]), ys = pts.flatMap((q) => [q.y, q.gy]);
+    this.cullables.push({ obj: g, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
     const c = l.wet ? 0xd6eaf8 : Phaser.Display.Color.IntegerToColor(l.color).lighten(25).color;
     pts.forEach((q, k) => { if (k % 4 === 0) g.lineStyle(5, 0x7f8c8d, 0.8).lineBetween(q.x, q.y, q.gx, q.gy); });
     g.lineStyle(14, 0x2c3e50, 0.6).beginPath().moveTo(pts[0].x, pts[0].y);
@@ -491,6 +537,7 @@ class Park extends Phaser.Scene {
     const base = iso(l.i, l.j, l.h), c = iso(l.i, l.j, l.h + 1.9);
     const g = this.add.graphics().setDepth(l.i + l.j + 0.6);
     const r = 150;
+    this.cullables.push({ obj: g, x0: c.x - r - 30, y0: c.y - r - 30, x1: c.x + r + 30, y1: base.y + 10 });
     g.lineStyle(10, 0x7f8c8d, 1).lineBetween(base.x - 60, base.y, c.x, c.y).lineBetween(base.x + 60, base.y, c.x, c.y);
     g.lineStyle(8, 0xf39c12, 1).strokeCircle(c.x, c.y, r);
     for (let k = 0; k < 12; k++) {
@@ -510,6 +557,7 @@ class Park extends Phaser.Scene {
   block(l: LocDef) {
     const g = this.add.graphics().setDepth(l.i + l.j);
     const i0 = l.i - l.w / 2, i1 = l.i + l.w / 2, j0 = l.j - l.d / 2, j1 = l.j + l.d / 2;
+    this.cullables.push({ obj: g, x0: iso(i0, j1).x - 20, y0: iso(i0, j0, l.h).y - 20, x1: iso(i1 + 0.4, j0).x + 20, y1: iso(i1 + 0.4, j1 + 0.3).y + 20 });
     const c = Phaser.Display.Color.IntegerToColor(l.color);
     const shade = (k: number) => Phaser.Display.Color.GetColor(c.red * k, c.green * k, c.blue * k);
     const face = (pts: { x: number; y: number }[], color: number) => {
@@ -547,6 +595,64 @@ class Park extends Phaser.Scene {
     }
     if (ouch) sfx.misery();
     for (const b of this.sim.banners.splice(0)) { toast(b, 4500); sfx.banner(); }
+  }
+
+  /** Stamp a static vector layer into the ground texture so it costs nothing per frame. */
+  bakeIntoGround(g: Phaser.GameObjects.Graphics) {
+    const { rt, lo, S } = this.ground;
+    g.setScale(S);
+    rt.draw(g, -lo.x * S, -lo.y * S);
+    g.destroy();
+  }
+
+  /** A ground circle of r tiles as a 24-point polygon (cheaper than strokeEllipse every frame). */
+  ring(x: number, y: number, r: number) {
+    const rx = r * HALF * Math.SQRT2, ry = (r * HALF * Math.SQRT2) / 2;
+    return Array.from({ length: 24 }, (_, k) => {
+      const t = (k / 24) * Math.PI * 2;
+      return new Phaser.Math.Vector2(x + Math.cos(t) * rx, y + Math.sin(t) * ry);
+    });
+  }
+
+  /** Is a world-space box near the camera's view? */
+  inView(x0: number, y0: number, x1 = x0, y1 = y0, pad = 400) {
+    const v = this.cameras.main.worldView;
+    return x1 >= v.x - pad && x0 <= v.right + pad && y1 >= v.y - pad && y0 <= v.bottom + pad;
+  }
+
+  /** Pre-render the little background people once, one texture per shirt colour. */
+  bakePawns() {
+    const bake = (key: string, w: number, h: number, draw: (g: Phaser.GameObjects.Graphics) => void) => {
+      if (this.textures.exists(key)) return;
+      const g = this.make.graphics({}, false);
+      draw(g);
+      g.generateTexture(key, w, h);
+      g.destroy();
+    };
+    bake("p_deb", 50, 110, (g) => this.pawn(g, 25, 102, 0xe84393));
+    bake("p_gary", 50, 110, (g) => this.pawn(g, 25, 102, 0xf39c12));
+    bake("p_me", 50, 110, (g) => this.pawn(g, 25, 102, 0x2ecc71, true));
+    bake("p_brad", 50, 110, (g) => this.pawn(g, 25, 102, 0xdfe6e9, false, 1, true));
+    bake("car0", 66, 40, (g) => { g.fillStyle(0x922b21, 1).fillRoundedRect(3, 3, 60, 34, 8); g.lineStyle(3, 0x000000, 0.6).strokeRoundedRect(3, 3, 60, 34, 8); });
+    bake("car1", 66, 40, (g) => { g.fillStyle(0x1e8449, 1).fillRoundedRect(3, 3, 60, 34, 8); g.lineStyle(3, 0x000000, 0.6).strokeRoundedRect(3, 3, 60, 34, 8); });
+    for (const [k, c] of [["gon0", 0xf1c40f], ["gon1", 0xe67e22]] as [string, number][]) {
+      bake(k, 36, 48, (g) => { g.lineStyle(3, 0x2c3e50, 0.8).lineBetween(18, 0, 18, 20); g.fillStyle(c, 1).fillRoundedRect(2, 20, 32, 26, 6); });
+    }
+    SHIRTS.forEach((color, k) => {
+      if (!this.textures.exists("pawn" + k)) {
+        const g = this.make.graphics({}, false);
+        this.pawn(g, 20, 66, color, false, 0.6);
+        g.generateTexture("pawn" + k, 40, 70);
+        g.destroy();
+      }
+      if (!this.textures.exists("qpawn" + k)) {
+        const g = this.make.graphics({}, false);
+        g.fillStyle(color, 1).fillRoundedRect(3, 14, 14, 24, 5);
+        g.fillStyle(0xf1c27d, 1).fillCircle(10, 8, 7);
+        g.generateTexture("qpawn" + k, 20, 40);
+        g.destroy();
+      }
+    });
   }
 
   /** Background guests wander between junctions (visual only). */
@@ -644,50 +750,45 @@ class Park extends Phaser.Scene {
       const f = (((this.trainPhase - c * 0.012) % 1) + 1) % 1 * track.length;
       const k0 = Math.floor(f), k1 = (k0 + 1) % track.length, t = f - k0;
       const q = iso(track[k0].i + (track[k1].i - track[k0].i) * t, track[k0].j + (track[k1].j - track[k0].j) * t);
-      g.fillStyle(c === 0 ? 0x922b21 : 0x1e8449, 1).fillRoundedRect(q.x - 30, q.y - 40, 60, 34, 8);
-      g.lineStyle(3, 0x000000, 0.6).strokeRoundedRect(q.x - 30, q.y - 40, 60, 34, 8);
+      this.sprites.cars[c].setPosition(q.x, q.y - 3);
     }
     const skyE = EDGES.find((e) => e.mode === "sky")!;
     const s0 = iso(NODES[skyE.a].i, NODES[skyE.a].j), s1 = iso(NODES[skyE.b].i, NODES[skyE.b].j);
     for (let c = 0; c < 6; c++) {
       const t = (this.skyPhase + c / 6) % 1, back = t > 0.5, tt = back ? 1 - (t - 0.5) * 2 : t * 2;
       const x = s0.x + (s1.x - s0.x) * tt, y = s0.y + (s1.y - s0.y) * tt - 170 + (back ? -14 : 14);
-      g.lineStyle(3, 0x2c3e50, 0.8).lineBetween(x, y - 18, x, y);
-      g.fillStyle(back ? 0xe67e22 : 0xf1c40f, 1).fillRoundedRect(x - 16, y, 32, 26, 6);
+      this.sprites.gondolas[c].setPosition(x, y - 20).setTexture(back ? "gon1" : "gon0");
     }
 
-    // Background crowd, scaled with how busy the park is.
+    // Background crowd (pre-baked pawn images), scaled with how busy the park is.
     const h = s.time / 60;
     const busy = (0.6 + 0.6 * Math.exp(-((h - 15) ** 2) / 8)) / 1.2;
     const shown = Math.round(this.crowd.length * busy);
-    for (let n = 0; n < shown; n++) {
-      const c = this.crowd[n], p = iso(c.pos.i, c.pos.j);
-      this.pawn(g, p.x + ((n * 37) % 30) - 15, p.y + ((n * 53) % 20) - 10, c.color, false, 0.6);
-    }
-    // Visible lines at open rides.
-    for (const l of LOCS) {
-      if (l.kind !== "ride" || s.isClosed(l.id)) continue;
-      const n = Math.min(9, Math.round(s.currentWait(l.id) / 7));
-      const a = NODES[l.node], b = this.doorPoint(l);
-      for (let q = 0; q < n; q++) {
-        const t = 0.15 + (q / 10) * 0.8;
-        const p = iso(a.i + (b.i - a.i) * t + (q % 2) * 0.12, a.j + (b.j - a.j) * t - (q % 2) * 0.12);
-        g.fillStyle(SHIRTS[(q * 3 + l.id.length) % SHIRTS.length], 1).fillRoundedRect(p.x - 7, p.y - 30, 14, 24, 5);
-        g.fillStyle(0xf1c27d, 1).fillCircle(p.x, p.y - 36, 7);
+    this.crowd.forEach((c, n) => {
+      const vis = n < shown;
+      c.img.setVisible(vis);
+      if (vis) { const p = iso(c.pos.i, c.pos.j); c.img.setPosition(p.x + ((n * 37) % 30) - 15, p.y + ((n * 53) % 20) - 10); }
+    });
+    // Visible lines at open rides: show as many queued people as the wait suggests.
+    if (this.time.now > this.linesAt) {
+      this.linesAt = this.time.now + 500;
+      for (const [id, imgs] of Object.entries(this.lineImgs)) {
+        const n = s.isClosed(id) ? 0 : Math.min(imgs.length, Math.round(s.currentWait(id) / 7));
+        imgs.forEach((im, q) => im.setVisible(q < n));
       }
     }
     // Brad, and his sight ring (red once he's suspicious).
     const bp = iso(s.brad.pos.i, s.brad.pos.j);
     const alarmed = s.suspicion >= 50;
     g.lineStyle(alarmed ? 6 : 3, alarmed ? 0xff3b30 : 0xffffff, alarmed ? 0.55 : 0.18)
-      .strokeEllipse(bp.x, bp.y, 6 * 2 * HALF * Math.SQRT2, 6 * HALF * Math.SQRT2);
-    this.pawn(g, bp.x, bp.y, 0xdfe6e9, false, 1, true);
+      .strokePoints(this.ring(bp.x, bp.y, 6), true);
+    this.sprites.brad.setPosition(bp.x, bp.y);
     k = this.icon(k, alarmed ? "👔❗" : "👔", bp.x, bp.y - 104, 44);
 
     // Earshot ring around you.
     const wp = iso(s.w.pos.i, s.w.pos.j);
     if (!s.has("radio")) {
-      g.lineStyle(4, 0xffffff, 0.25).strokeEllipse(wp.x, wp.y, 9 * 2 * HALF * Math.SQRT2, 9 * HALF * Math.SQRT2);
+      g.lineStyle(4, 0xffffff, 0.25).strokePoints(this.ring(wp.x, wp.y, 9), true);
     }
     // Your route.
     if (s.w.route.length) {
@@ -708,7 +809,8 @@ class Park extends Phaser.Scene {
     if (ga.t !== "gone") {
       const c = iso(s.g.pos.i, s.g.pos.j);
       if (this.sel?.kind === "guests") g.lineStyle(8, 0xffd166, 1).strokeEllipse(c.x, c.y, 150, 75);
-      [[0xe84393, -16], [0xf39c12, 16]].forEach(([col, dx]) => this.pawn(g, c.x + dx, c.y + (dx > 0 ? 6 : -6), col));
+      this.sprites.deb.setVisible(true).setPosition(c.x - 16, c.y - 6);
+      this.sprites.gary.setVisible(true).setPosition(c.x + 16, c.y + 6);
       k = this.icon(k, [s.mood(), ...s.statuses()].join(""), c.x, c.y - 104, 48);
       if (ga.t === "queue") {
         const pct = 1 - ga.left / ga.total;
@@ -723,9 +825,11 @@ class Park extends Phaser.Scene {
       }
     } else {
       this.bubble.setVisible(false);
+      this.sprites.deb.setVisible(false);
+      this.sprites.gary.setVisible(false);
     }
     // You: green vest, cap.
-    this.pawn(g, wp.x, wp.y, 0x2ecc71, true);
+    this.sprites.me.setPosition(wp.x, wp.y);
     if (s.w.task) {
       const pct = 1 - s.w.task.left / s.w.task.total;
       g.fillStyle(0x000000, 0.6).fillRect(wp.x - 40, wp.y - 120, 80, 12);
@@ -736,7 +840,11 @@ class Park extends Phaser.Scene {
     // Labels hold a constant on-screen size; hide building names when zoomed far out.
     const tileCss = (zoom * HALF * 2) / DPR;
     const ls = (12 * DPR) / (40 * zoom);
-    for (const t of Object.values(this.locLabels)) t.setScale(ls).setVisible(tileCss >= 20);
+    for (const t of Object.values(this.locLabels)) {
+      const vis = tileCss >= 20 && this.inView(t.x, t.y);
+      if (t.visible !== vis) t.setVisible(vis);
+      if (vis && t.scaleX !== ls) t.setScale(ls);
+    }
     for (const t of this.landLabels) t.setScale(Math.max(ls * 1.2, 1)).setAlpha(tileCss >= 20 ? 0.55 : 0.95);
   }
 
@@ -761,7 +869,8 @@ class Park extends Phaser.Scene {
       if (ga.t === "queue" && ga.loc === l.id) status += ` · 👥 ${Math.round((1 - ga.left / ga.total) * 100)}% to front`;
       const text = status ? `${l.name}\n${status}` : l.name;
       if (t.text !== text) t.setText(text);
-      t.setColor(s.isClosed(l.id) ? "#ffb3a7" : st.def.kind === "ride" ? "#ffffff" : "#fff3c4");
+      const color = s.isClosed(l.id) ? "#ffb3a7" : st.def.kind === "ride" ? "#ffffff" : "#fff3c4";
+      if (t.style.color !== color) t.setColor(color);
     }
   }
 
@@ -1042,6 +1151,10 @@ class Park extends Phaser.Scene {
       this.running = false;
       window.setTimeout(() => this.showResults(), 1200);
     }
+    if (this.time.now > this.cullAt) {
+      this.cullAt = this.time.now + 120;
+      for (const c of this.cullables) c.obj.setVisible(this.inView(c.x0, c.y0, c.x1, c.y1));
+    }
     this.drainFx();
     this.updateSky();
     if (this.camFollow) {
@@ -1064,7 +1177,7 @@ function boot() {
     width: size().w,
     height: size().h,
     scale: { mode: Phaser.Scale.NONE, zoom: 1 / DPR },
-    render: { antialias: true },
+    render: { antialias: true, powerPreference: "high-performance" },
     scene: Park,
   });
   window.addEventListener("resize", () => game.scale.resize(size().w, size().h));

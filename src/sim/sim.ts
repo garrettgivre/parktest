@@ -1105,7 +1105,10 @@ export class Sim {
       case "show": {
         const st = w!.def.showTime!;
         if (this.time > st) {
-          this.hurt(20 * w!.def.weight, 14, "lateShow", true, w);
+          // Only your fault if you actually held them up recently.
+          const delayers = ["survey", "scenic", "detour", "parade", "stuck", "megaphone", "smoke", "gas", "jam"];
+          const yoursLate = this.hits.some((h) => delayers.includes(h.reason) && this.time - h.time < 75);
+          this.hurt(20 * w!.def.weight, 14, yoursLate ? "lateShow" : "lateShowPark", yoursLate, w);
           this.say(this.line("lateShow", {}, w!.def.who), "bad", true);
           w!.failed = true;
           return this.decide();
@@ -1479,7 +1482,9 @@ export class Sim {
     add("fryer", "We could not find food that was open. At a THEME PARK.");
     add("restroom", "Every bathroom was out of order. My husband used a dumpster.");
     add("show", "The show was cancelled after we waited around for it.");
-    add("lateShow", "Some employee kept us for a “survey” and we missed the show.");
+    if (reasons.has("lateShow")) lines.push(reasons.has("survey")
+      ? "Some employee kept us for a “survey” and we missed the show."
+      : "Everything in this park made us late. We missed the show.");
     add("survey", "A guy with a clipboard would not stop asking us questions.");
     add("detour", "Wet Floor signs everywhere. It hasn't rained in weeks.");
     add("reader", "Gift shop was cash only. In this economy.");
