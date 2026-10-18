@@ -26,6 +26,7 @@ const TIPS: { id: string; when: (s: Sim) => boolean; text: string }[] = [
 ];
 
 const CROWD = 44;
+const GRAYBOX = store.get("park.graybox") === "1"; // Settings: show gray-box blocks instead of rendered art
 const SHIRTS = [0xe74c3c, 0x3498db, 0x9b59b6, 0x1abc9c, 0xf1c40f, 0xe67e22, 0xecf0f1, 0x34495e, 0x16a085, 0xd35400];
 
 // Gameplay test v1: big gray-box park, a worker you walk around, DOM panels.
@@ -106,6 +107,27 @@ class Park extends Phaser.Scene {
   lastSky = "";
   seenTips = new Set<string>((store.get("park.tips") ?? "").split(",").filter(Boolean));
   gestured = false;
+
+  /** Load rendered building sprites if they exist (npm run art). Missing ones fall back to gray-box. */
+  preload() {
+    if (GRAYBOX) return;
+    this.load.json("parkArt", "sprites/park/manifest.json");
+    this.load.once("filecomplete-json-parkArt", () => {
+      const m = this.cache.json.get("parkArt") as { sprites: Record<string, unknown> } | undefined;
+      for (const id of Object.keys(m?.sprites ?? {})) this.load.image("spr_" + id, `sprites/park/${id}.png`);
+    });
+  }
+
+  /** Place a rendered sprite for an asset if we have one. Returns false to fall back to a block. */
+  sprite(id: string, i: number, j: number) {
+    const m = this.cache.json.get("parkArt") as { sprites: Record<string, { w: number; h: number; ax: number; ay: number }> } | undefined;
+    const sp = m?.sprites[id];
+    if (GRAYBOX || !sp || !this.textures.exists("spr_" + id)) return false;
+    const p = iso(i, j);
+    const img = this.add.image(p.x, p.y, "spr_" + id).setOrigin(sp.ax / sp.w, sp.ay / sp.h).setDepth(i + j);
+    this.cullables.push({ obj: img, x0: p.x - sp.ax, y0: p.y - sp.ay, x1: p.x - sp.ax + sp.w, y1: p.y - sp.ay + sp.h });
+    return true;
+  }
 
   create() {
     current = this;
@@ -197,11 +219,13 @@ class Park extends Phaser.Scene {
       el.classList.toggle("hidden");
       (el.querySelector("[data-set=autopause]") as HTMLInputElement).checked = current.autoPause;
       (el.querySelector("[data-set=sound]") as HTMLInputElement).checked = !isMuted();
+      (el.querySelector("[data-set=graybox]") as HTMLInputElement).checked = GRAYBOX;
     });
     $("settings").addEventListener("change", (e) => {
       const el = e.target as HTMLInputElement;
       if (el.dataset.set === "autopause") { current.autoPause = el.checked; store.set("park.autopause", el.checked ? "1" : "0"); }
       if (el.dataset.set === "sound") { setMuted(!el.checked); unlock(); sfx.tap(); }
+      if (el.dataset.set === "graybox") { store.set("park.graybox", el.checked ? "1" : "0"); location.reload(); }
     });
     $("settings").addEventListener("click", (e) => {
       if ((e.target as HTMLElement).dataset.set === "tips") {
@@ -342,29 +366,31 @@ class Park extends Phaser.Scene {
 
     // Buildings, decor, landmarks, labels.
     for (const l of [...LOCS].sort((x, y) => x.i + x.j - (y.i + y.j))) {
-      this.block(l);
+      if (!this.sprite(l.id, l.i, l.j)) this.block(l);
       const top = iso(l.i, l.j, l.h);
       this.locLabels[l.id] = this.add.text(top.x, top.y - 16, l.name, {
         fontFamily: "Trebuchet MS, Verdana, sans-serif", fontSize: "40px", color: "#ffffff",
         stroke: "#000000", strokeThickness: 8, align: "center",
       }).setOrigin(0.5, 1).setDepth(6000);
     }
-    for (const d of DECOR) {
+    for (const [k, d] of DECOR.entries()) {
       const ij = { i: (d.u + d.v) / 2, j: (d.v - d.u) / 2 };
-      this.block({ ...ij, w: d.w, d: d.d, h: d.h, color: d.color } as LocDef);
+      const art = this.sprite("decor" + k, ij.i, ij.j);
+      if (!art) this.block({ ...ij, w: d.w, d: d.d, h: d.h, color: d.color } as LocDef);
       const top = iso(ij.i, ij.j, d.h);
-      if (d.icon) this.add.text(top.x, top.y + 6, d.icon, { fontSize: "64px" }).setOrigin(0.5, 1).setDepth(ij.i + ij.j + 0.5);
+      if (d.icon && !art) this.add.text(top.x, top.y + 6, d.icon, { fontSize: "64px" }).setOrigin(0.5, 1).setDepth(ij.i + ij.j + 0.5);
       if (d.label) {
         this.add.text(top.x, top.y - 50, d.label, {
           fontFamily: "Trebuchet MS, Verdana, sans-serif", fontSize: "30px", color: "#dddddd", stroke: "#000", strokeThickness: 6,
         }).setOrigin(0.5, 1).setDepth(5950);
       }
     }
-    for (const m of LANDMARKS) {
+    for (const [k, m] of LANDMARKS.entries()) {
       const ij = { i: (m.u + m.v) / 2, j: (m.v - m.u) / 2 };
-      this.block({ ...ij, w: 0.9, d: 0.9, h: m.h, color: m.color } as LocDef);
+      const art = this.sprite("landmark" + k, ij.i, ij.j);
+      if (!art) this.block({ ...ij, w: 0.9, d: 0.9, h: m.h, color: m.color } as LocDef);
       const top = iso(ij.i, ij.j, m.h);
-      this.add.text(top.x, top.y + 10, m.icon, { fontSize: "110px" }).setOrigin(0.5, 1).setDepth(ij.i + ij.j + 0.5);
+      if (!art) this.add.text(top.x, top.y + 10, m.icon, { fontSize: "110px" }).setOrigin(0.5, 1).setDepth(ij.i + ij.j + 0.5);
     }
     for (const id of [...RING_IDS, "hub", "lot"] as ZoneId[]) {
       const z = ZONES[id];

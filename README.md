@@ -22,3 +22,14 @@ npm run sprites -- bench    # re-render just one prop
 
 
 ```
+
+## Park art
+
+```bash
+npm run assets             # export art/assets.json from the park data
+npm run art                # render every building with the Blender kit (needs Blender 4.5)
+npm run art -- bbq rocket  # re-render specific buildings
+```
+
+Sprites land in `public/sprites/park/`. Textures go in `art/textures/`. The look, the
+pipeline and ChatGPT texture prompts are in [docs/art.md](docs/art.md).
