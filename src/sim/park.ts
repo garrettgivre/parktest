@@ -110,11 +110,11 @@ const RING: [ZoneId, string, number, string, number][] = [
   ["extinction", "Extinction Junction", 0x9a8f80, "Where the asteroid hit. Scorched fiberglass, smoke vents, a drop tower.", 14],
   ["atomic", "Atomic Acres", 0x9d8fd0, "The future, as seen from 1958. Rockets, satellites, a theater.", 38],
   ["mall", "Tomorrow Mall", 0xb08fc4, "The future, as seen from 1985. A dying mall with an arcade and a food court.", 13],
-  ["aero", "Aero Heights", 0x9adcef, "The future, as seen from 2008. Glossy glass, bubbles, sky-blue optimism.", 38],
+  ["aero", "Aero Heights", 0xc6dde4, "The future, as seen from 2008. Glossy glass, bubbles, sky-blue optimism.", 38],
   ["y2k", "Y2K Plaza", 0xb9b7e8, "Glossy bubbles meet dance-pop. A selfie wall. Frosted tips.", 13],
   ["mirrorball", "Mirrorball Mile", 0xd58ad8, "The park's disco, run by the queens who made it. Corporate keeps trying to rename it “Fun Zone C.” They keep losing.", 36],
-  ["foam", "Foam Party Pier", 0xa7a6e0, "A foam party on a dock. You will be soaked and deafened.", 14],
-  ["lagoon", "Landlocked Lagoon", 0x79bde2, "An ocean land, 600 miles from any ocean.", 42],
+  ["foam", "Foam Party Pier", 0xc4b9d8, "A foam party on a dock. You will be soaked and deafened.", 14],
+  ["lagoon", "Landlocked Lagoon", 0xd8cc9c, "An ocean land, 600 miles from any ocean.", 42],
   ["ozark", "Ozark Boardwalk", 0xa9b98a, "Lake-life energy: a bait shop that sells funnel cake, a party-cove boat.", 15],
 ];
 const PARENTS: Record<BlendId, [LandId, LandId]> = {

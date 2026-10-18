@@ -11,7 +11,13 @@ render sprites, and let textures carry the detail.
 npm run assets               # write art/assets.json from the park data
 npm run art                  # render every building to public/sprites/park/
 npm run art -- emporium bbq  # re-render just these
+npm run people               # render the character sprite sheets
 ```
+
+- **People (`art/build_people.py`):** low-poly figures (Deb, Gary, you, Brad and six crowd
+  types) rendered from the game camera in 4 facings × 4 walk frames into one sprite sheet
+  each (`public/sprites/people/`). The game turns them to face their direction of travel
+  and plays the walk cycle while they move.
 
 - **`art/build_park.py`** builds each building from a *kit*: the **zone** picks materials
   and roof style, the **kind** picks the shape (food counter, ride station, restroom,
@@ -100,7 +106,7 @@ target the owners, never the cultures (see docs/research.md).
 
 1. Textures for the slots above (biggest visual jump for the least effort).
 2. Ground tiles to replace the painted ground (grass, pavers per zone, boardwalk, sand).
-3. People: a rigged low-poly guest (Mixamo) rendered in 8 directions with a walk cycle,
-   replacing the pawns. Deb, Gary, you (vest + cap) and Brad (tie, clipboard).
+3. ~~People~~ done (4 directions, walk cycle). Later: 8 directions, idle/queue poses,
+   reaction animations (soaked, furious, eating).
 4. Coaster tracks as real models instead of drawn lines.
 5. Hero passes on the headliners and landmarks.

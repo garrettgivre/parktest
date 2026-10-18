@@ -338,6 +338,17 @@ def text(body, loc, size, material, face="-y", extrude=0.01, max_w=None):
     return o
 
 
+def beam(p0, p1, r, material, verts=8):
+    """A cylinder from point p0 to point p1."""
+    p0, p1 = Vector(p0), Vector(p1)
+    mid, vec = (p0 + p1) / 2, p1 - p0
+    bpy.ops.mesh.primitive_cylinder_add(vertices=verts, radius=r, depth=vec.length, location=mid)
+    o = bpy.context.active_object
+    o.rotation_euler = vec.to_track_quat("Z", "Y").to_euler()
+    o.data.materials.append(material)
+    return o
+
+
 def gable(w, d, z, rise, material, overhang=0.12):
     """A pitched roof running along x."""
     import bmesh
@@ -554,6 +565,14 @@ def ride(a, st):
         for y in (-d / 2 + 0.12, d / 2 - 0.12):
             cyl(0.05, a["h"] * 0.8, (x, y, plat_h + a["h"] * 0.4), STEEL, verts=8)
     roof(st, w, d, plat_h + a["h"] * 0.8)
+    # A short stretch of track through the station with the train parked in it.
+    for y in (-0.12, 0.12):
+        box((w + 0.8, 0.04, 0.04), (0, y, plat_h + 0.04), STEEL)
+    car = st["accent"] if st["accent"] not in (BULB,) else solid((0.85, 0.15, 0.12))
+    for k in range(3):
+        x = -w * 0.3 + k * w * 0.3
+        box((w * 0.26, 0.42, 0.22), (x, 0, plat_h + 0.18), car, bevel=0.05)
+        box((w * 0.2, 0.34, 0.06), (x, 0, plat_h + 0.32), DARK)
     for k in range(3):  # queue rails out front
         box((w * 0.8, 0.03, 0.03), (0, -d / 2 - 0.25 - k * 0.22, 0.45), STEEL)
     if a.get("sign"):
@@ -724,13 +743,19 @@ def landmark(a, st):
         cyl(0.78, 0.05, (0, 0, 0.3), solid((0.35, 0.5, 0.45)), verts=32)  # stagnant water
         cyl(0.18, 0.9, (0, 0, 0.6), CREAM, verts=12)
         cyl(0.4, 0.12, (0, 0, 1.05), CREAM, verts=16)
-    elif icon == "🗼":  # the 14-foot Eiffel Tower
-        for k in range(4):
-            t = math.radians(45 + k * 90)
-            cyl(0.06, h * 0.55, (math.cos(t) * 0.32, math.sin(t) * 0.32, h * 0.25), STEEL, verts=6,
-                rot=(math.sin(t) * 0.35, -math.cos(t) * 0.35, 0))
-        box((0.55, 0.55, 0.06), (0, 0, h * 0.5), STEEL)
-        cyl(0.1, h * 0.5, (0, 0, h * 0.75), STEEL, verts=6, r2=0.02)
+    elif icon == "🗼":  # the 14-foot Eiffel Tower (it's 14 feet)
+        iron = solid((0.42, 0.36, 0.3), rough=0.5, metal=0.6)
+        levels = [(0.0, 0.62), (h * 0.32, 0.36), (h * 0.62, 0.16), (h * 0.9, 0.05)]
+        for (z0, r0), (z1, r1) in zip(levels, levels[1:]):
+            for k in range(4):
+                t = math.radians(45 + k * 90)
+                beam((math.cos(t) * r0, math.sin(t) * r0, z0), (math.cos(t) * r1, math.sin(t) * r1, z1), 0.04, iron, 6)
+                t2 = math.radians(45 + (k + 1) * 90)
+                beam((math.cos(t) * r0, math.sin(t) * r0, z0), (math.cos(t2) * r1, math.sin(t2) * r1, z1), 0.015, iron, 4)
+            box((r1 * 1.9, r1 * 1.9, 0.05), (0, 0, z1), iron)
+        beam((0, 0, h * 0.9), (0, 0, h * 1.12), 0.025, iron, 6)
+        box((0.5, 0.04, 0.16), (0, -0.66, 0.35), solid((0.95, 0.92, 0.85)))
+        text("14 FT", (0, -0.69, 0.35), 0.1, solid((0.3, 0.2, 0.15)))
     elif icon == "🦖":
         g = solid((0.2, 0.55, 0.25))
         box((0.9, 0.5, 0.7), (0, 0, 1.0), g, bevel=0.15)
