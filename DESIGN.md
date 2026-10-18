@@ -74,6 +74,22 @@ meat served as the vegan option, barely any decorations.
 - Dialogue variants for every moment, and ambient park awfulness from real reviews.
   See [docs/research.md](docs/research.md).
 
+## v1.2: more systems for the first day
+
+- **Brad the manager** walks the park. Calm below 50 suspicion; patrols your land from 50;
+  tails you from 75. Sabotage inside his sight ring costs +20 and he calls it out. Doing a
+  duty in front of him earns extra goodwill. He also sends the duties.
+- **Staff service roads** (dashed) only you and Brad can use: get ahead of the guests.
+- **Day arc:** heat advisory 1–4 PM (lines drain patience; unplugged queue fans hit
+  hard), one random storm closes outdoor coasters (free misery, cover), the Haunt opens at
+  7 PM (a new "scream at the Haunt" wish; monsters can be sent on break), night falls.
+- **Megaphone** tool: announce their destination is closed; they re-plan. Herding.
+- **Crowds** wander the paths; rides show visible lines.
+- **Tips** fire once per browser for the first time each situation comes up; **sound**
+  (synthesized) and **auto-pause** toggles in ⚙️.
+- **Results** get a grade (S–F) with a title, a misery-by-category breakdown, combos, the
+  review and Brad's memo.
+
 ## Core loop (v0 proposal, superseded by v1 above where they differ)
 
 - One run = one park day, ~5 minutes of play, with Sims-style pause/speed controls.

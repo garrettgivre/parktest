@@ -3,7 +3,7 @@
 import { Kind, LOCS, LocDef } from "./park";
 
 export type ToolId =
-  | "keys" | "patties" | "wetfloor" | "clipboard" | "walkie" | "cart" | "radio" | "mascot" | "vouchers";
+  | "keys" | "patties" | "wetfloor" | "clipboard" | "walkie" | "cart" | "radio" | "mascot" | "vouchers" | "megaphone";
 
 export interface ToolDef { id: ToolId; name: string; icon: string; blurb: string; charges?: number }
 
@@ -16,6 +16,7 @@ export const TOOLS: ToolDef[] = [
   { id: "cart", name: "Golf Cart Keys", icon: "🛺", blurb: "You move 1.8× faster all day." },
   { id: "radio", name: "Radio Scanner", icon: "📡", blurb: "Hear everything they say, from anywhere." },
   { id: "mascot", name: "Mascot Suit", icon: "🦖", blurb: "Nobody suspects the dinosaur. No witness penalty." },
+  { id: "megaphone", name: "Megaphone", icon: "📢", blurb: "Within earshot, announce that wherever they're headed is \u201cclosed.\u201d They re-plan. Herd them into traps.", charges: 3 },
   { id: "vouchers", name: "Comp Vouchers", icon: "🎟️", blurb: "Hand them a free FastPass: Patience +15, a little cover.", charges: 3 },
 ];
 export const TOOL: Record<ToolId, ToolDef> = Object.fromEntries(TOOLS.map((t) => [t.id, t])) as Record<ToolId, ToolDef>;
@@ -24,7 +25,7 @@ export type ActionId =
   | "scanner" | "close" | "slow" | "fryer" | "veg" | "clog" | "outoforder" | "mascot" | "reader"
   | "wetfloor" | "survey" | "churro" | "voucher" | "radioclose" | "duty"
   | "parade" | "spin" | "jam" | "timeshare" | "appcrash" | "dj" | "splash"
-  | "oldowner" | "upcharge" | "lockers";
+  | "oldowner" | "upcharge" | "lockers" | "fans" | "monsters" | "megaphone";
 
 export interface ActionDef {
   id: ActionId;
@@ -51,6 +52,8 @@ export const ACTIONS: ActionDef[] = [
   { id: "outoforder", kinds: ["restroom"], name: "Lock it: OUT OF ORDER", blurb: "Out of order for 60 min.", minutes: 1, susp: 6, cooldown: 120, duration: 60, tool: "keys" },
   { id: "mascot", kinds: ["show"], name: "Mascot no-show", blurb: "The star “calls in sick.” Cancels the next show here.", minutes: 5, susp: 15 },
   { id: "reader", kinds: ["shop"], name: "Card reader down", blurb: "Cash only for 60 min.", minutes: 3, susp: 5, cooldown: 120, duration: 60 },
+  { id: "fans", kinds: ["ride"], name: "Unplug the queue fans", blurb: "For 2 hours this line is a sauna. Brutal during the 1\u20134 PM heat advisory.", minutes: 1, susp: 3, cooldown: 150, duration: 120 },
+  { id: "monsters", locs: ["barn"], name: "Send the monsters on break", blurb: "Haunt only. For 90 min the Scare Barn is a dark barn and a guy eating a pretzel.", minutes: 2, susp: 6, cooldown: 180, duration: 90 },
   { id: "oldowner", kinds: ["relations"], name: "Route complaints to \u201cthe old company\u201d", blurb: "For 2 hours, every complaint is the old owner's policy. They get a gift card for 20% of a souvenir cup.", minutes: 3, susp: 6, cooldown: 180, duration: 120 },
   { id: "lockers", locs: ["rocket", "aero", "glitter", "leviathan"], name: "Enforce the locker policy", blurb: "For 90 min, lockers here bill by the minute. A long line costs them, and the bag comes out the wrong side.", minutes: 2, susp: 4, cooldown: 180, duration: 90 },
   // One signature move per land.
@@ -84,7 +87,8 @@ export const COMBOS: ComboDef[] = [
 export const COMBO: Record<string, ComboDef> = Object.fromEntries(COMBOS.map((c) => [c.id, c]));
 export const ACTION: Record<string, ActionDef> = Object.fromEntries(ACTIONS.map((a) => [a.id, a]));
 
-export const SPECIAL: Record<"wetfloor" | "survey" | "churro" | "voucher" | "radioclose" | "duty", ActionDef> = {
+export const SPECIAL: Record<"wetfloor" | "survey" | "churro" | "voucher" | "radioclose" | "duty" | "megaphone", ActionDef> = {
+  megaphone: { id: "megaphone", name: "Announce a fake closure", blurb: "Wherever they're walking to is \u201cclosed.\u201d They pick something else.", minutes: 1, susp: 5, tool: "megaphone" },
   wetfloor: { id: "wetfloor", name: "Put out a Wet Floor sign", blurb: "Blocks this junction for 45 min. Guests detour.", minutes: 1, susp: 3, tool: "wetfloor", duration: 45 },
   survey: { id: "survey", name: "“Got a minute for a survey?”", blurb: "Hold them up 15 min. Misery +5.", minutes: 15, susp: 4, tool: "clipboard" },
   churro: { id: "churro", name: "Apologize & comp a churro", blurb: "Patience +6. Buys a little goodwill.", minutes: 1, susp: 0, cooldown: 90 },
@@ -136,7 +140,7 @@ export function makeDay(rng: () => number) {
   const who = () => pick(rng, ["Deb", "Gary"]);
   const rides = LOCS.filter((l) => l.kind === "ride");
   const heads = rides.filter((l) => l.headliner);
-  const others = rides.filter((l) => !l.headliner);
+  const others = rides.filter((l) => !l.headliner && l.id !== "barn");
   const wishes: WishDef[] = [];
   const ride = (l: LocDef, weight: number) => wishes.push({
     id: l.id, label: `Ride ${l.name}`, loc: l.id, who: who(), weight,
@@ -160,6 +164,10 @@ export function makeDay(rng: () => number) {
     weight: has("showfan") ? 1.8 : 1.2, ask: `We HAVE to get seats for the ${show.showName}.`,
   });
 
+  wishes.push({
+    id: "haunt", label: "Scream at the Scare Barn Haunt (after 7 PM)", loc: "barn", who: who(), weight: 1.3,
+    ask: "The Haunt's open! Let's go get SCARED.",
+  });
   const shop = pick(rng, LOCS.filter((l) => l.kind === "shop"));
   wishes.push({
     id: "merch", label: `Matching hoodies from ${shop.name}`, loc: shop.id, who: "Gary",

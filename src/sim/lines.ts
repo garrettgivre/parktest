@@ -189,4 +189,22 @@ export const LINES: Record<string, string[]> = {
     `{A}: "We got a gift card. For 20% of a souvenir cup."`,
     `{A}: "She thanked us for our patience four times and then closed the window."`,
   ],
+  bradCaught: [
+    `Brad: "Hey. HEY. What are you doing to that {thing}?"`,
+    `Brad: "I'm going to need you to step away from the {thing}. Per policy."`,
+    `Brad: "Are you\u2026 unplugging the {thing}? We'll circle back on this."`,
+  ],
+  bradPraise: [`Brad: "Love the hustle. Love it."`, `Brad: "This is the energy I need from you. Noted. Positively."`],
+  fans: [
+    `{A}: "The fans aren't even on. It's a SAUNA in here."`,
+    `{A}: "There are fans. They're just\u2026 decorative?"`,
+  ],
+  monsters: [
+    `{A}: "There were no monsters. There was a guy on a bench eating a pretzel."`,
+    `{A}: "The 'Haunt' was a dark barn and a fog machine that sneezed once."`,
+  ],
+  megaphone: [
+    `{A}: "They said it's closed? Ugh. Fine, somewhere else."`,
+    `{A}: "Did that guy just announce it closed? With a megaphone? Okay\u2026"`,
+  ],
 };

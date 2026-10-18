@@ -15,6 +15,9 @@ function careful(cap: number, minPatience: number, doDuties: boolean) {
   return (s: Sim) => {
     if (s.w.task || s.w.pending) return;
     const g = s.g.act;
+    // Never sabotage where Brad can see (a human sees his sight ring and the +20).
+    const doAction = s.doAction.bind(s);
+    s.doAction = (t, d) => (d.susp > 0 && s.bradSees(t) ? false : doAction(t, d));
     if (s.patience < minPatience) {
       const v = s.actionsFor({ kind: "guests" }).find((a) => !a.why && (a.def.id === "voucher" || a.def.id === "churro"));
       if (v) { s.doAction({ kind: "guests" }, v.def); return; }

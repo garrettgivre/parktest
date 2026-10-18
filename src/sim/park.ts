@@ -136,6 +136,16 @@ for (const [a, b] of E) {
 }
 export const EDGES = E;
 
+// Staff-only service roads: the worker (and Brad) can cut through backstage.
+export const SERVICE: [string, string][] = [["M1", "A1"], ["G", "R3"], ["P2", "A3"], ["S2", "F2"], ["O2", "A4"]];
+export const ADJ_STAFF: Record<string, { to: string; len: number }[]> = {};
+for (const id of Object.keys(ADJ)) ADJ_STAFF[id] = [...ADJ[id]];
+for (const [a, b] of SERVICE) {
+  const len = Math.hypot(NODES[a].i - NODES[b].i, NODES[a].j - NODES[b].j);
+  ADJ_STAFF[a].push({ to: b, len });
+  ADJ_STAFF[b].push({ to: a, len });
+}
+
 export const LOCS: LocDef[] = L_.map(([id, name, kind, land, node, u, v, w, d, h, color, x]) => ({
   id, name, kind, land, node, u, v, w, d, h, color, ...toIJ(u, v), ...(x ?? {}),
 }));
@@ -143,7 +153,8 @@ export const LOC: Record<string, LocDef> = Object.fromEntries(LOCS.map((l) => [l
 export const LAND: Record<LandId, Land> = Object.fromEntries(LANDS.map((l) => [l.id, l])) as Record<LandId, Land>;
 
 /** Shortest path between nodes (Dijkstra). Blocked nodes can't be passed through. */
-export function shortest(from: string, to: string, blocked: Set<string> = new Set()) {
+export function shortest(from: string, to: string, blocked: Set<string> = new Set(), staff = false) {
+  const adj = staff ? ADJ_STAFF : ADJ;
   const dist: Record<string, number> = { [from]: 0 };
   const prev: Record<string, string> = {};
   const open = new Set([from]);
@@ -152,7 +163,7 @@ export function shortest(from: string, to: string, blocked: Set<string> = new Se
     for (const n of open) if (dist[n] < best) { best = dist[n]; cur = n; }
     open.delete(cur);
     if (cur === to) break;
-    for (const { to: nb, len } of ADJ[cur]) {
+    for (const { to: nb, len } of adj[cur]) {
       if (blocked.has(nb) && nb !== to) continue;
       const d = best + len;
       if (d < (dist[nb] ?? Infinity)) { dist[nb] = d; prev[nb] = cur; open.add(nb); }

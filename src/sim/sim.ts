@@ -19,6 +19,25 @@ const WITNESS = 5;
 const REACH = 2.5; // how close you must be to talk to them
 const PATIENCE_HIT = 1.3;
 const REPEAT_WEIGHT = 0.7;
+const BRAD_SPEED = 1.4;
+const BRAD_SIGHT = 6;
+const HEAT = [13 * 60, 16 * 60];
+const HAUNT = 19 * 60;
+const OUTDOOR = ["rocket", "aero", "glitter", "leviathan", "raptor", "balloon"];
+
+// Where misery came from, for the results breakdown.
+const CATEGORY: Record<string, string> = {
+  closed: "Ride closures", closedFront: "Ride closures", app: "Ride closures", jam: "Ride closures",
+  slow: "Endless lines", fans: "Endless lines",
+  locker: "Nickel & diming", reader: "Nickel & diming", upcharge: "Nickel & diming",
+  fryer: "Food crimes", veg: "Food crimes", queasy: "Food crimes", food: "Food crimes",
+  restroom: "Restroom warfare",
+  show: "Show business", lateShow: "Show business", timeshare: "Show business", monsters: "Show business",
+  soaked: "Weather & water",
+  parade: "General chaos", dj: "General chaos", detour: "General chaos", megaphone: "General chaos",
+  survey: "General chaos", scanner: "General chaos",
+  complainBad: "Customer service",
+};
 
 export interface P { i: number; j: number }
 const dist = (a: P, b: P) => Math.hypot(a.i - b.i, a.j - b.j);
@@ -28,7 +47,7 @@ export function fmtTime(min: number) {
   return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
-interface Mover { pos: P; route: string[]; prev: string }
+interface Mover { pos: P; route: string[]; prev: string; staff?: boolean }
 
 export interface LocState {
   def: LocDef;
@@ -44,9 +63,11 @@ export interface LocState {
   oldOwnerUntil: number;
   upchargeUntil: number;
   lockerUntil: number;
+  fansUntil: number;
+  monstersUntil: number;
 }
 
-export interface Fx { type: "misery" | "combo"; text: string }
+export interface Fx { type: "misery" | "combo" | "caught"; text: string }
 
 const MONEY = ["reader", "upcharge", "locker"];
 const RUINS = ["complainBad", "closed", "closedFront", "show", "timeshare", "veg", "reader", "lateShow", "fryer", "app", "jam"];
@@ -119,6 +140,16 @@ export class Sim {
   private ruined: { time: number; id: string }[] = [];
   private nextAmbient = OPEN + 40;
   private complained = false;
+  brad: Mover & { pause: number };
+  banners: string[] = []; // UI toasts for day events
+  miseryBy: Record<string, number> = {};
+  rainAt: number;
+  rainUntil = 0;
+  private heatOn = false;
+  private rained = false;
+  private hauntOpen = false;
+  private bradTimer = 0;
+  private avoid: Record<string, number> = {}; // places they were told are closed
   private lockerHit = "";
   private hits: { time: number; reason: string }[] = [];
   private sabLog: number[] = [];
@@ -135,7 +166,7 @@ export class Sim {
       this.locs[def.id] = {
         def, closedUntil: 0, closedBy: null, slowUntil: 0, vegSwap: false, readerUntil: 0,
         showCancelled: false, scannerBroken: false, readyAt: {}, timeshare: false,
-        oldOwnerUntil: 0, upchargeUntil: 0, lockerUntil: 0,
+        oldOwnerUntil: 0, upchargeUntil: 0, lockerUntil: 0, fansUntil: 0, monstersUntil: 0,
       };
     }
     const day = makeDay(this.rng);
@@ -145,7 +176,9 @@ export class Sim {
     this.breakdowns = [this.between(11 * 60, 14 * 60), this.between(14 * 60, 17 * 60), this.between(17 * 60, 20 * 60)];
     const gate = NODES.G;
     this.g = { pos: { i: gate.i + 2, j: gate.j + 2 }, route: ["G"], prev: "G", act: { t: "walk", goal: { loc: "gate", purpose: "gate" } } };
-    this.w = { pos: { i: NODES.M1.i, j: NODES.M1.j }, route: [], prev: "M1", task: null, pending: null, follow: false };
+    this.w = { pos: { i: NODES.M1.i, j: NODES.M1.j }, route: [], prev: "M1", staff: true, task: null, pending: null, follow: false };
+    this.brad = { pos: { i: NODES.H.i, j: NODES.H.j }, route: [], prev: "H", staff: true, pause: 20 };
+    this.rainAt = this.between(13.5 * 60, 18.5 * 60);
     this.note("The Hendersons are pulling up to the Front Gate. Those ticket scanners look… fragile.", "park");
   }
 
@@ -215,13 +248,13 @@ export class Sim {
   private plan(m: Mover, target: string, blocked: Set<string>) {
     const a = m.prev, b = m.route[0];
     const opts: { cost: number; route: string[] }[] = [];
-    const ra = shortest(a, target, blocked);
+    const ra = shortest(a, target, blocked, !!m.staff);
     if (ra) {
       const d = dist(m.pos, NODES[a]);
       opts.push({ cost: d + ra.len, route: d < 0.05 ? ra.path.slice(1) : ra.path });
     }
     if (b && b !== a) {
-      const rb = shortest(b, target, blocked);
+      const rb = shortest(b, target, blocked, !!m.staff);
       if (rb) opts.push({ cost: dist(m.pos, NODES[b]) + rb.len, route: rb.path });
     }
     if (!opts.length) return null;
@@ -293,7 +326,7 @@ export class Sim {
     }
     if (wish && RUINS.includes(reason)) this.ruined.push({ time: this.time, id: wish.def.id });
     const m = misery * mult;
-    this.misery += m;
+    this.addMisery(m, reason);
     if (m >= 1) this.fx.push({ type: "misery", text: `+${Math.round(m)}` });
     this.patience -= patience * PATIENCE_HIT;
     if (yours) {
@@ -304,6 +337,24 @@ export class Sim {
     }
   }
 
+  private addMisery(m: number, reason: string) {
+    this.misery += m;
+    this.miseryBy[reason] = (this.miseryBy[reason] ?? 0) + m;
+  }
+
+  heat() { return this.time >= HEAT[0] && this.time < HEAT[1]; }
+  raining() { return this.rainUntil > this.time; }
+
+  /** Can Brad see where this would happen? */
+  bradSees(t: Target) {
+    const where = t.kind === "guests" ? this.w.pos : NODES[this.targetNode(t)!];
+    return dist(this.brad.pos, where) <= BRAD_SIGHT;
+  }
+
+  bradMode() {
+    return this.suspicion >= 75 ? "Watching you. Closely." : this.suspicion >= 50 ? "Patrolling near you" : "Strolling, holding a clipboard";
+  }
+
   private combosFor(reason: string, wish?: Wish) {
     const t = this.time;
     const mine = (r: string, win: number) => this.hits.some((h) => h.reason === r && t - h.time < win);
@@ -311,7 +362,7 @@ export class Sim {
     if (reason === "closedFront") out.push("soclose");
     if (reason === "restroom" && t - this.slowQueueAt < 90) out.push("ambush");
     if (reason === "restroom" && mine("restroom", 45)) out.push("tour");
-    if ((reason === "closed" || reason === "closedFront") && mine("detour", 40)) out.push("scenic");
+    if ((reason === "closed" || reason === "closedFront") && (mine("detour", 40) || mine("megaphone", 40))) out.push("scenic");
     if (reason === "fryer" && this.hunger >= 85) out.push("hangry");
     if (reason === "lateShow" && mine("survey", 45)) out.push("feedback");
     if (wish && RUINS.includes(reason)) {
@@ -345,10 +396,10 @@ export class Sim {
     return this.patience > 70 ? "😀" : this.patience > 45 ? "😐" : this.patience > 20 ? "😠" : "🤬";
   }
 
-  private soak() {
+  private soak(yours = true) {
     if (this.soakedUntil > this.time) return;
     this.soakedUntil = this.time + 90;
-    this.hurt(8, 4, "soaked");
+    this.hurt(8, 4, "soaked", yours);
     this.say(this.line("soaked"), "bad", true);
   }
 
@@ -392,6 +443,7 @@ export class Sim {
       defs.push(SPECIAL.churro);
       if ("clipboard" in this.tools) defs.push(SPECIAL.survey);
       if ("vouchers" in this.tools) defs.push(SPECIAL.voucher);
+      if ("megaphone" in this.tools) defs.push(SPECIAL.megaphone);
     }
     return defs.map((def) => ({
       def,
@@ -409,7 +461,11 @@ export class Sim {
 
   private walkFor(t: Target, def: ActionDef) {
     if (def.id === "radioclose") return 0;
-    if (t.kind === "guests") return this.nearGuests() ? 0 : dist(this.w.pos, this.g.pos) / this.workerSpeed();
+    if (t.kind === "guests") {
+      const reach = def.id === "megaphone" ? EARSHOT : REACH;
+      const d = dist(this.w.pos, this.g.pos);
+      return d <= reach ? 0 : (d - reach + 0.5) / this.workerSpeed();
+    }
     const n = this.targetNode(t)!;
     return this.workerAt(n) ? 0 : this.walkMinutes(n);
   }
@@ -421,7 +477,8 @@ export class Sim {
     if (a.id === "churro" && this.churroReady > this.time) return `Ready ${fmtTime(this.churroReady)}`;
     if (t.kind === "guests") {
       if (this.g.act.t === "gone") return "They're gone";
-      if (a.id === "survey" && this.g.act.t !== "walk") return "Only while they're walking";
+      if ((a.id === "survey" || a.id === "megaphone") && this.g.act.t !== "walk") return "Only while they're walking";
+      if (a.id === "megaphone" && this.g.act.t === "walk" && ["exit", "gate", "complain"].includes(this.g.act.goal.purpose)) return "Not now";
       return null;
     }
     if (t.kind === "node") return this.isBlocked(t.id) ? "Already blocked" : null;
@@ -449,6 +506,10 @@ export class Sim {
       case "oldowner": return l.oldOwnerUntil > this.time ? "Already briefed" : null;
       case "upcharge": return l.upchargeUntil > this.time ? "Already upcharged" : null;
       case "lockers": return l.lockerUntil > this.time ? "Already enforced" : null;
+      case "fans": return l.fansUntil > this.time ? "Already unplugged" : null;
+      case "monsters":
+        if (this.time < HAUNT - 30) return "The Haunt isn't open yet";
+        return l.monstersUntil > this.time ? "Already on break" : null;
       case "spin": return this.spinUntil > this.time ? "Already cranked" : null;
       case "appcrash": return this.appDownUntil > this.time ? "App's already down" : null;
       case "dj": return this.djUntil > this.time ? "Already looping" : null;
@@ -471,7 +532,7 @@ export class Sim {
     const land = t.kind === "loc" ? this.locs[t.id].def.land : t.kind === "node" ? NODES[t.id].land : null;
     if (land && this.alibi && this.alibi.land === land && this.alibi.until > this.time) c *= 0.6;
     if (this.suspicion >= 75) c *= 1.5;
-    return Math.round(c + 3 * this.recent(this.sabLog));
+    return Math.round(c + 3 * this.recent(this.sabLog)) + (this.bradSees(t) ? 20 : 0);
   }
 
   isWitnessed(t: Target) {
@@ -518,6 +579,11 @@ export class Sim {
     if (a.cooldown && t.kind === "loc") this.locs[t.id].readyAt[a.id] = this.time + a.cooldown;
     if (a.susp > 0) this.sabLog.push(this.time);
     this.suspicion = Math.max(0, this.suspicion + cost);
+    if (a.susp > 0 && this.bradSees(t)) {
+      const thing = t.kind === "loc" ? this.locs[t.id].def.name : t.kind === "node" ? "floor" : "guests";
+      this.note(this.line("bradCaught", { thing }), "boss");
+      this.fx.push({ type: "caught", text: "Brad saw that! +20" });
+    }
     const until = this.time + (a.duration ?? 0);
 
     if (t.kind === "guests") {
@@ -530,6 +596,17 @@ export class Sim {
         const g = this.g.act;
         if (g.t === "queue") g.left = Math.min(g.left, 2);
         this.say(this.line("voucher"), "good", true);
+      } else if (a.id === "megaphone") {
+        const ga = this.g.act;
+        if (ga.t === "walk") {
+          const loc = ga.goal.loc;
+          this.avoid[loc] = this.time + 45;
+          if (ga.goal.wish) ga.goal.wish.retryAt = this.time + 45;
+          if (["food", "restroom"].includes(LOC[loc].kind)) this.closedSeen[loc] = this.time + 45;
+          this.hurt(3, 3, "megaphone");
+          this.say(this.line("megaphone"), "bad", true);
+          this.decide();
+        }
       } else if (a.id === "survey") {
         this.hurt(5, 3, "survey");
         this.say(this.line("surveyEnd"), "bad", true);
@@ -551,7 +628,11 @@ export class Sim {
         this.suspicion = Math.max(0, this.suspicion - 6);
         this.alibi = { land: l.def.land, until: this.time + 60 };
         this.nextDutyAt = this.time + this.between(90, 130);
-        this.note(`Duty done. Manager: "Noted." (You have an alibi around here for an hour.)`, "boss");
+        if (this.bradSees(t)) {
+          this.suspicion = Math.max(0, this.suspicion - 4);
+          this.note(this.line("bradPraise"), "boss");
+        }
+        this.note(`Duty done. Brad: "Noted." (You have an alibi around here for an hour.)`, "boss");
         return;
       case "scanner":
         l.scannerBroken = true;
@@ -585,6 +666,14 @@ export class Sim {
       case "reader":
         l.readerUntil = until;
         this.note(`${name} card reader unplugged. Cash only.`, "you");
+        return;
+      case "fans":
+        l.fansUntil = until;
+        this.note(`Queue fans at ${name}: unplugged. They were decorative anyway.`, "you");
+        return;
+      case "monsters":
+        l.monstersUntil = until;
+        this.note("The Scare Barn monsters are on break. All of them. Simultaneously.", "you");
         return;
       case "oldowner":
         l.oldOwnerUntil = until;
@@ -743,14 +832,15 @@ export class Sim {
       const f = this.nearest("food");
       if (f) return this.goTo({ loc: f.id, purpose: "food" });
     }
-    const rides = this.wishes.filter((w) => LOC[w.def.loc].kind === "ride" && this.open(w) && w.retryAt <= t);
+    const rides = this.wishes.filter((w) => LOC[w.def.loc].kind === "ride" && this.open(w) && w.retryAt <= t
+      && (w.def.id !== "haunt" || t >= HAUNT));
     if (rides.length) {
       const best = rides.map((w) => ({ w, s: w.def.weight * 30 - this.pathLen(w.def.loc) }))
         .sort((a, b) => b.s - a.s)[0].w;
       return this.announce(best, "wish");
     }
     if (this.rng() < 0.75) {
-      const near = LOCS.filter((l) => l.kind === "ride" && l.id !== this.lastRide && !this.isClosed(l.id))
+      const near = LOCS.filter((l) => l.kind === "ride" && l.id !== this.lastRide && !this.isClosed(l.id) && (this.avoid[l.id] ?? 0) <= t)
         .map((l) => ({ l, d: this.pathLen(l.id) })).sort((a, b) => a.d - b.d).slice(0, 4);
       if (near.length) {
         const l = near[Math.floor(this.rng() * near.length)].l;
@@ -813,6 +903,7 @@ export class Sim {
           this.hurt(4, 2, "locker", true, w);
           this.say(this.line("locker"), "bad", true);
         }
+        if (l.fansUntil > this.time) this.say(this.line("fans"), "bad", true);
         const wait = this.currentWait(l.def.id);
         this.g.act = { t: "queue", loc: l.def.id, total: wait, left: wait, wish: w };
         if (wait >= 50) this.say(this.line("longWait", { min: wait }));
@@ -934,6 +1025,12 @@ export class Sim {
           this.hurt(6, 4, "queasy");
           this.say(this.line("queasy"), "bad", true);
         }
+        if (a.loc === "barn" && this.locs.barn.monstersUntil > this.time) {
+          this.hurt(18 * (a.wish?.def.weight ?? REPEAT_WEIGHT), 8, "monsters", true, a.wish);
+          this.say(this.line("monsters"), "bad", true);
+          if (a.wish) a.wish.failed = true;
+          return;
+        }
         if (a.wish) { a.wish.done = true; this.joy(6, 8); } else this.joy(3, 4);
         this.say(this.line("rideDone", {}, a.wish?.def.who), "good");
       },
@@ -972,11 +1069,13 @@ export class Sim {
       }
     }
     this.tickDuty();
+    this.tickDayArc();
+    this.tickBrad(dt);
     if (this.g.act.t !== "gone" && this.time >= OPEN) {
-      if (this.soakedUntil > this.time) { this.misery += 0.06 * dt; this.patience -= 0.03 * dt; }
-      if (this.queasyUntil > this.time) this.misery += 0.05 * dt;
+      if (this.soakedUntil > this.time) { this.addMisery(0.06 * dt, "soaked"); this.patience -= 0.03 * dt; }
+      if (this.queasyUntil > this.time) this.addMisery(0.05 * dt, "queasy");
       if (this.djUntil > this.time && this.guestLand() === "rave") {
-        this.misery += 0.25 * dt;
+        this.addMisery(0.25 * dt, "dj");
         this.patience -= 0.06 * dt;
         if (!this.djHit) {
           this.djHit = true;
@@ -1002,11 +1101,58 @@ export class Sim {
     if (this.patience <= 0 && !this.leaving && this.g.act.t !== "gone") this.decide();
   }
 
+  private banner(text: string) {
+    this.banners.push(text);
+    this.note(text, "park");
+  }
+
+  private tickDayArc() {
+    if (!this.heatOn && this.time >= HEAT[0]) {
+      this.heatOn = true;
+      this.banner("\u2600\ufe0f Heat advisory until 4 PM. Every line is a slow-cook.");
+    }
+    if (!this.rained && this.time >= this.rainAt) {
+      this.rained = true;
+      this.rainUntil = this.time + 35;
+      this.banner("\ud83c\udf27\ufe0f Surprise storm! Outdoor coasters closed for lightning. Not your fault. (Cover!)");
+      this.suspicion = Math.max(0, this.suspicion - 6);
+      for (const id of OUTDOOR) if (!this.isClosed(id)) this.closeLoc(id, this.rainUntil, "park");
+      if (this.g.act.t === "walk") this.soak(false);
+    }
+    if (!this.hauntOpen && this.time >= HAUNT) {
+      this.hauntOpen = true;
+      this.banner("\ud83c\udf83 The Haunt is open! Scare Barn monsters report for duty. Most of them.");
+    }
+  }
+
+  private tickBrad(dt: number) {
+    const b = this.brad;
+    if (!b.route.length) {
+      if (b.pause > 0) { b.pause -= dt; return; }
+      let target: string;
+      if (this.suspicion >= 75) target = this.w.route[0] ?? this.w.prev;
+      else {
+        const land = this.suspicion >= 50 ? NODES[this.w.prev].land : null;
+        const ids = Object.values(NODES).filter((n) => !land || n.land === land).map((n) => n.id);
+        target = ids[Math.floor(this.rng() * ids.length)];
+      }
+      b.pause = this.suspicion >= 75 ? 0.5 : this.between(4, 10);
+      this.routeTo(b, target);
+    } else if (this.suspicion >= 75) {
+      this.bradTimer -= dt;
+      if (this.bradTimer <= 0) {
+        this.bradTimer = 2;
+        this.routeTo(b, this.w.route[0] ?? this.w.prev);
+      }
+    }
+    this.move(b, BRAD_SPEED * (this.suspicion >= 75 ? 1.25 : 1), dt);
+  }
+
   private tickDuty() {
     if (this.duty && this.time > this.duty.deadline) {
       this.dutiesMissed++;
       this.suspicion += 8;
-      this.note(`Manager: "I didn't see you at ${LOC[this.duty.loc].name}. I'll be making a note."`, "boss");
+      this.note(`Brad: "I didn't see you at ${LOC[this.duty.loc].name}. I'll be making a note."`, "boss");
       this.duty = null;
       this.nextDutyAt = this.time + this.between(90, 130);
     }
@@ -1015,7 +1161,7 @@ export class Sim {
       const l = opts[Math.floor(this.rng() * opts.length)];
       const deadline = this.time + 75;
       this.duty = { loc: l.id, deadline, text: dutyText(this.rng, l.name, fmtTime(deadline)) };
-      this.note(`Manager: "${this.duty.text}"`, "boss");
+      this.note(`Brad (radio): "${this.duty.text}"`, "boss");
       this.pauses.push(`New duty: ${l.name}`);
     }
   }
@@ -1049,10 +1195,16 @@ export class Sim {
       case "queue": {
         a.left -= dt * (this.isSlow(a.loc) ? 0.5 : 1);
         this.patience -= (this.trait("impatient") ? 0.065 : 0.045) * dt;
-        if (this.locs[a.loc].lockerUntil > this.time) this.misery += 0.15 * dt; // the meter is running
+        if (this.locs[a.loc].lockerUntil > this.time) this.addMisery(0.15 * dt, "locker"); // the meter is running
+        if (this.locs[a.loc].fansUntil > this.time) {
+          const hot = this.heat();
+          this.addMisery((hot ? 0.2 : 0.07) * dt, "fans");
+          this.patience -= (hot ? 0.05 : 0.015) * dt;
+        }
+        if (this.heat()) this.patience -= 0.02 * dt; // heat advisory
         if (this.isSlow(a.loc)) {
           this.slowQueueAt = this.time;
-          this.misery += 0.12 * dt;
+          this.addMisery(0.12 * dt, "slow");
           this.patience -= 0.04 * dt;
           this.slowSuffered = true;
         }
@@ -1091,7 +1243,7 @@ export class Sim {
     this.move(w, this.workerSpeed(), dt);
     const p = w.pending;
     if (!p?.action) return;
-    if (p.target.kind === "guests" ? this.nearGuests() : !w.route.length) {
+    if (p.target.kind === "guests" ? this.nearGuests(p.action.id === "megaphone" ? EARSHOT : REACH) : !w.route.length) {
       const why = this.cantDo(p.target, p.action);
       w.pending = null;
       if (why) this.note(`Couldn't do it: ${why}.`, "you");
@@ -1125,6 +1277,9 @@ export class Sim {
     add("timeshare", "The \u201cshow\u201d was a timeshare pitch. We own part of a condo in Branson now.");
     add("app", "Their app erased us from a line we were physically standing in.");
     add("dj", "The Rave area played ONE song. For an hour. I can still hear it.");
+    add("fans", "The queue fans were unplugged. During a HEAT ADVISORY.");
+    add("monsters", "The Haunt had no monsters. Just a guy eating a pretzel.");
+    add("megaphone", "Staff kept announcing rides were closed. They weren't. Or were they?");
     add("upcharge", "They charged us EXTRA for the haunted barn. We have season passes.");
     add("locker", "The locker charged by the minute because THEIR line was slow.");
     add("complainBad", "Guest Relations said it was the old company's policy. Which old company?!");
@@ -1133,16 +1288,43 @@ export class Sim {
     if (!lines.length) lines.push("Honestly? Kind of a nice day. Lines were long, I guess.");
     const stars = Math.max(1, 5 - Math.floor(this.misery / 40));
     const done = this.wishes.filter((w) => w.done).length;
+    const { grade } = this.grade(why, score);
     const memo =
-      why === "fired" ? "Your badge has been deactivated. Please return your vest. — Mgmt"
-        : score >= 200 ? "Guest satisfaction is at an all-time low. Promotion pending. — The New Owners"
-        : score >= 100 ? "Solid work. Per-guest spend is down, morale is down, we're thrilled. — The New Owners"
+      why === "fired" ? "Your badge has been deactivated. Please return your vest. — Brad"
+        : grade === "S" || grade === "A" ? "Guest satisfaction is at an all-time low. Promotion pending. — The New Owners"
+        : grade === "B" ? "Solid work. Per-guest spend is down, morale is down, we're thrilled. — The New Owners"
+        : grade === "C" ? "Mixed results. They bought a souvenir. We'll be circling back. — Brad"
         : "They had FUN? We'll be discussing this at your review. — The New Owners";
     return {
       why, mult, score, misery: Math.round(this.misery), stars, lines, done, total: this.wishes.length, memo,
       duties: `${this.dutiesDone} done, ${this.dutiesMissed} skipped`,
       combos: [...new Set(this.combosHit)].map((id) => COMBO[id].name),
+      ...this.grade(why, score),
+      breakdown: this.breakdown(),
     };
+  }
+
+  private grade(why: EndReason, score: number) {
+    if (why === "fired") return { grade: "F", title: "Escorted Off Property" };
+    const g: [number, string, string][] = [
+      [400, "S", "Employee of the Month (Derogatory)"],
+      [280, "A", "Rising Star in Guest Disappointment"],
+      [190, "B", "Solidly Mediocre Saboteur"],
+      [110, "C", "Accidentally Helpful"],
+      [50, "D", "Basically Customer Service"],
+    ];
+    for (const [min, grade, title] of g) if (score >= min) return { grade, title };
+    return { grade: "F", title: "They Had a Nice Day. Shameful." };
+  }
+
+  private breakdown() {
+    const by: Record<string, number> = {};
+    for (const [r, m] of Object.entries(this.miseryBy)) {
+      const cat = CATEGORY[r] ?? "Other";
+      by[cat] = (by[cat] ?? 0) + m;
+    }
+    return Object.entries(by).map(([label, value]) => ({ label, value: Math.round(value) }))
+      .filter((x) => x.value > 0).sort((a, b) => b.value - a.value).slice(0, 6);
   }
 }
 

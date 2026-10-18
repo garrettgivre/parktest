@@ -11,6 +11,7 @@
 </head>
 <body>
   <div id="game"></div>
+  <div id="sky"></div>
 
   <div id="clock" class="panel">
     <div class="sub">Funtier Lands · Fright Fest-ish</div>
@@ -20,6 +21,12 @@
       <button data-speed="1" class="on">▶</button>
       <button data-speed="2">▶▶</button>
       <button data-speed="4">▶▶▶</button>
+      <button id="gear" title="Settings">⚙️</button>
+    </div>
+    <div id="settings" class="hidden">
+      <label><input type="checkbox" data-set="autopause" /> Auto-pause on big moments</label>
+      <label><input type="checkbox" data-set="sound" /> Sound</label>
+      <button data-set="tips">Show tips again</button>
     </div>
   </div>
 

@@ -1,7 +1,29 @@
 import Phaser from "phaser";
 import { COMBOS, TOOL, TOOLS, TRAITS, ToolId } from "../sim/content";
-import { EDGES, LAKE, LANDS, LOC, LOCS, LocDef, NODES } from "../sim/park";
-import { ActionView, Sim, Target, fmtTime } from "../sim/sim";
+import { EDGES, LAKE, LANDS, LOC, LOCS, LocDef, NODES, SERVICE, shortest } from "../sim/park";
+import { isMuted, setMuted, sfx, unlock } from "./sfx";
+import { ActionView, OPEN, Sim, Target, fmtTime } from "../sim/sim";
+
+const store = {
+  get(k: string) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* storage blocked */ } },
+};
+
+// First-time tips. Each fires once (remembered per browser) when its condition holds.
+const TIPS: { id: string; when: (s: Sim) => boolean; text: string }[] = [
+  { id: "gate", when: (s) => s.time < OPEN + 4, text: "Tip: tap the Front Gate. They haven't scanned in yet, and those scanners look fragile\u2026" },
+  { id: "queue", when: (s) => s.g.act.t === "queue" && !!s.g.act.wish && s.heard(), text: "Tip: they're in line for something they want. Close it when the bar over them turns red for a \u201cSo Close!\u201d" },
+  { id: "earshot", when: (s) => !s.heard() && s.time > OPEN + 25, text: "Tip: you're out of earshot. Tail them (\ud83d\udc65) to overhear plans, or go set a trap somewhere." },
+  { id: "duty", when: (s) => !!s.duty, text: "Tip: Brad's duties lower suspicion and give you an alibi in that land. Skipping one costs you." },
+  { id: "brad", when: (s) => s.suspicion >= 45, text: "Tip: Brad is getting curious. Never sabotage inside his red sight ring (+20 suspicion)." },
+  { id: "patience", when: (s) => s.patience < 40, text: "Tip: their Patience is low. Ease off or comp a churro \u2014 at zero they go home." },
+  { id: "complain", when: (s) => s.g.act.t === "walk" && s.g.act.goal.purpose === "complain", text: "Tip: they're heading to Guest Relations! Beat them there and route complaints to \u201cthe old company.\u201d" },
+  { id: "heat", when: (s) => s.heat(), text: "Tip: heat advisory! Unplugged queue fans hit much harder until 4 PM." },
+  { id: "haunt", when: (s) => s.time >= 18 * 60 + 20, text: "Tip: the Haunt opens at 7. Its monsters can be\u2026 sent on break." },
+];
+
+const CROWD = 44;
+const SHIRTS = [0xe74c3c, 0x3498db, 0x9b59b6, 0x1abc9c, 0xf1c40f, 0xe67e22, 0xecf0f1, 0x34495e, 0x16a085, 0xd35400];
 
 // Gameplay test v1: big gray-box park, a worker you walk around, DOM panels.
 
@@ -33,6 +55,14 @@ function comboCallout(text: string) {
   comboTimer = window.setTimeout(() => el.classList.remove("show"), 2200);
 }
 
+function caughtCallout(text: string) {
+  const el = $("combo");
+  el.textContent = text;
+  el.classList.add("caught");
+  comboCallout(text);
+  window.setTimeout(() => el.classList.remove("caught"), 2300);
+}
+
 function toast(msg: string, ms = 2600) {
   const el = $("toast");
   el.textContent = msg;
@@ -57,6 +87,11 @@ class Park extends Phaser.Scene {
   lastHud = "";
   pinch: { d: number; zoom: number } | null = null;
   camFollow = true; // camera tracks you until you drag the map
+  crowd: { pos: { i: number; j: number }; route: string[]; prev: string; color: number }[] = [];
+  tipQueue: string[] = [];
+  tipAt = 0;
+  lastSky = "";
+  seenTips = new Set<string>((store.get("park.tips") ?? "").split(",").filter(Boolean));
   gestured = false;
 
   create() {
@@ -78,6 +113,12 @@ class Park extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(8000).setVisible(false);
 
     this.setupCamera();
+    const ids = Object.keys(NODES);
+    this.crowd = Array.from({ length: CROWD }, (_, k) => {
+      const n = NODES[ids[k % ids.length]];
+      return { pos: { i: n.i + Math.random() - 0.5, j: n.j + Math.random() - 0.5 }, route: [], prev: n.id, color: SHIRTS[k % SHIRTS.length] };
+    });
+    this.autoPause = store.get("park.autopause") !== "0";
     if (!wired) this.wireDom();
     this.setSpeed(1);
     if (skipIntro) this.showBriefing();
@@ -118,6 +159,25 @@ class Park extends Phaser.Scene {
       const id = (e.target as HTMLElement).closest<HTMLElement>(".tool")?.dataset.tool as ToolId | undefined;
       if (id) toast(`${TOOL[id].icon} ${TOOL[id].name}: ${TOOL[id].blurb}`, 4000);
     });
+    $("gear").addEventListener("click", () => {
+      const el = $("settings");
+      el.classList.toggle("hidden");
+      (el.querySelector("[data-set=autopause]") as HTMLInputElement).checked = current.autoPause;
+      (el.querySelector("[data-set=sound]") as HTMLInputElement).checked = !isMuted();
+    });
+    $("settings").addEventListener("change", (e) => {
+      const el = e.target as HTMLInputElement;
+      if (el.dataset.set === "autopause") { current.autoPause = el.checked; store.set("park.autopause", el.checked ? "1" : "0"); }
+      if (el.dataset.set === "sound") { setMuted(!el.checked); unlock(); sfx.tap(); }
+    });
+    $("settings").addEventListener("click", (e) => {
+      if ((e.target as HTMLElement).dataset.set === "tips") {
+        current.seenTips.clear();
+        store.set("park.tips", "");
+        toast("Tips will show again.");
+      }
+    });
+    document.addEventListener("pointerdown", () => unlock(), { once: true });
     $("me").addEventListener("click", (e) => {
       if ((e.target as HTMLElement).closest("button")) current.sim.cancelTask();
     });
@@ -214,6 +274,15 @@ class Park extends Phaser.Scene {
       const pa = iso(n.i, n.j), pb = iso(door.i, door.j);
       line(pa.x, pa.y, pb.x, pb.y, 30);
     }
+    for (const [a, b] of SERVICE) {
+      const pa = iso(NODES[a].i, NODES[a].j), pb = iso(NODES[b].i, NODES[b].j);
+      const len = Phaser.Math.Distance.Between(pa.x, pa.y, pb.x, pb.y), n = Math.floor(len / 70);
+      for (let k = 0; k < n; k += 2) {
+        const t0 = k / n, t1 = (k + 1) / n;
+        paths.lineStyle(14, 0x5d4e37, 0.75).lineBetween(
+          pa.x + (pb.x - pa.x) * t0, pa.y + (pb.y - pa.y) * t0, pa.x + (pb.x - pa.x) * t1, pa.y + (pb.y - pa.y) * t1);
+      }
+    }
     for (const n of Object.values(NODES)) {
       const p = iso(n.i, n.j);
       paths.fillStyle(0xd9ccb4, 1).fillEllipse(p.x, p.y, 120, 60);
@@ -275,10 +344,58 @@ class Park extends Phaser.Scene {
   }
 
   drainFx() {
+    let ouch = false;
     for (const f of this.sim.fx.splice(0)) {
-      if (f.type === "misery") this.floatText(f.text, "#ff6b5b");
-      else { this.floatText(f.text, "#ffd166", true); comboCallout(`COMBO! ${f.text}`); }
+      if (f.type === "misery") { this.floatText(f.text, "#ff6b5b"); ouch = true; }
+      else if (f.type === "caught") { caughtCallout(f.text); sfx.caught(); }
+      else { this.floatText(f.text, "#ffd166", true); comboCallout(`COMBO! ${f.text}`); sfx.combo(); }
     }
+    if (ouch) sfx.misery();
+    for (const b of this.sim.banners.splice(0)) { toast(b, 4500); sfx.banner(); }
+  }
+
+  /** Background guests wander between junctions (visual only). */
+  tickCrowd(dtGame: number) {
+    const ids = Object.keys(NODES);
+    for (const c of this.crowd) {
+      if (!c.route.length) {
+        const r = shortest(c.prev, ids[Math.floor(Math.random() * ids.length)]);
+        c.route = r ? r.path.slice(1) : [];
+      }
+      let left = 1.2 * dtGame;
+      while (left > 0 && c.route.length) {
+        const n = NODES[c.route[0]];
+        const d = Math.hypot(n.i - c.pos.i, n.j - c.pos.j);
+        if (d <= left) { c.pos = { i: n.i, j: n.j }; c.prev = c.route.shift()!; left -= d; }
+        else { c.pos = { i: c.pos.i + ((n.i - c.pos.i) / d) * left, j: c.pos.j + ((n.j - c.pos.j) / d) * left }; left = 0; }
+      }
+    }
+  }
+
+  checkTips() {
+    const s = this.sim;
+    for (const t of TIPS) {
+      if (this.seenTips.has(t.id) || !t.when(s)) continue;
+      this.seenTips.add(t.id);
+      store.set("park.tips", [...this.seenTips].join(","));
+      this.tipQueue.push(t.text);
+    }
+    if (this.tipQueue.length && this.time.now > this.tipAt) {
+      toast(this.tipQueue.shift()!, 6000);
+      this.tipAt = this.time.now + 6500;
+    }
+  }
+
+  updateSky() {
+    const s = this.sim;
+    const night = Math.min(1, Math.max(0, (s.time - 18 * 60) / 120));
+    const cls = (s.raining() ? "rain " : "") + (s.heat() ? "heat" : "");
+    const key = `${night.toFixed(2)}|${cls}`;
+    if (key === this.lastSky) return;
+    this.lastSky = key;
+    const el = $("sky");
+    el.className = cls;
+    el.style.setProperty("--night", String(night * 0.42));
   }
 
   icon(k: number, text: string, x: number, y: number, size = 56) {
@@ -325,6 +442,34 @@ class Park extends Phaser.Scene {
       const n = NODES[this.sel.id], p = iso(n.i, n.j);
       g.lineStyle(8, 0xffd166, 1).strokeEllipse(p.x, p.y, 160, 80);
     }
+
+    // Background crowd, scaled with how busy the park is.
+    const h = s.time / 60;
+    const busy = (0.6 + 0.6 * Math.exp(-((h - 15) ** 2) / 8)) / 1.2;
+    const shown = Math.round(this.crowd.length * busy);
+    for (let n = 0; n < shown; n++) {
+      const c = this.crowd[n], p = iso(c.pos.i, c.pos.j);
+      this.pawn(g, p.x + ((n * 37) % 30) - 15, p.y + ((n * 53) % 20) - 10, c.color, false, 0.6);
+    }
+    // Visible lines at open rides.
+    for (const l of LOCS) {
+      if (l.kind !== "ride" || s.isClosed(l.id)) continue;
+      const n = Math.min(9, Math.round(s.currentWait(l.id) / 7));
+      const a = NODES[l.node], b = this.doorPoint(l);
+      for (let q = 0; q < n; q++) {
+        const t = 0.15 + (q / 10) * 0.8;
+        const p = iso(a.i + (b.i - a.i) * t + (q % 2) * 0.12, a.j + (b.j - a.j) * t - (q % 2) * 0.12);
+        g.fillStyle(SHIRTS[(q * 3 + l.id.length) % SHIRTS.length], 1).fillRoundedRect(p.x - 7, p.y - 30, 14, 24, 5);
+        g.fillStyle(0xf1c27d, 1).fillCircle(p.x, p.y - 36, 7);
+      }
+    }
+    // Brad, and his sight ring (red once he's suspicious).
+    const bp = iso(s.brad.pos.i, s.brad.pos.j);
+    const alarmed = s.suspicion >= 50;
+    g.lineStyle(alarmed ? 6 : 3, alarmed ? 0xff3b30 : 0xffffff, alarmed ? 0.55 : 0.18)
+      .strokeEllipse(bp.x, bp.y, 6 * 2 * HALF * Math.SQRT2, 6 * HALF * Math.SQRT2);
+    this.pawn(g, bp.x, bp.y, 0xdfe6e9, false, 1, true);
+    k = this.icon(k, alarmed ? "👔❗" : "👔", bp.x, bp.y - 104, 44);
 
     // Earshot ring around you.
     const wp = iso(s.w.pos.i, s.w.pos.j);
@@ -382,12 +527,13 @@ class Park extends Phaser.Scene {
     for (const t of this.landLabels) t.setScale(Math.max(ls * 1.2, 1)).setAlpha(tileCss >= 20 ? 0.55 : 0.95);
   }
 
-  pawn(g: Phaser.GameObjects.Graphics, x: number, y: number, color: number, worker = false) {
-    g.fillStyle(0x000000, 0.3).fillEllipse(x, y, 40, 18);
-    g.fillStyle(color, 1).fillRoundedRect(x - 13, y - 70, 26, 58, 9);
-    g.fillStyle(0xf1c27d, 1).fillCircle(x, y - 82, 14);
-    g.lineStyle(3, 0x000000, 0.7).strokeRoundedRect(x - 13, y - 70, 26, 58, 9).strokeCircle(x, y - 82, 14);
+  pawn(g: Phaser.GameObjects.Graphics, x: number, y: number, color: number, worker = false, k = 1, tie = false) {
+    g.fillStyle(0x000000, 0.3).fillEllipse(x, y, 40 * k, 18 * k);
+    g.fillStyle(color, 1).fillRoundedRect(x - 13 * k, y - 70 * k, 26 * k, 58 * k, 9 * k);
+    g.fillStyle(0xf1c27d, 1).fillCircle(x, y - 82 * k, 14 * k);
+    if (k >= 1) g.lineStyle(3, 0x000000, 0.7).strokeRoundedRect(x - 13, y - 70, 26, 58, 9).strokeCircle(x, y - 82, 14);
     if (worker) g.fillStyle(0x1e5631, 1).fillRect(x - 15, y - 98, 30, 9);
+    if (tie) g.fillStyle(0xc0392b, 1).fillTriangle(x - 4, y - 66, x + 4, y - 66, x, y - 36);
   }
 
   updateLabels() {
@@ -455,6 +601,7 @@ class Park extends Phaser.Scene {
       if (this.sel.kind === "guests") s.setFollow(true);
       else s.walkTo(this.sel.kind === "loc" ? LOC[this.sel.id].node : this.sel.id);
     }
+    sfx.tap();
     if (el.dataset.act) {
       const view = s.actionsFor(this.sel).find((a) => a.def.id === el.dataset.act);
       if (view && s.doAction(this.sel, view.def) && view.walk > 0) toast(`Walking over to: ${view.def.name}`);
@@ -496,6 +643,9 @@ class Park extends Phaser.Scene {
       if (s.isWitnessed(sel)) notes.push(`<span class="warn">They'd see you do it (+50% suspicion).</span>`);
       if (s.hasAlibi(l.land)) notes.push(`<span class="ok">You have an alibi in ${land.name} (−40%).</span>`);
       if (s.duty?.loc === l.id) notes.push(`<span class="here">📋 Your duty is here.</span>`);
+      if (s.bradSees(sel)) notes.push(`<span class="warn">👔 Brad can see this spot (+20 suspicion).</span>`);
+      if (l.kind === "ride" && s.heat()) notes.push(`<span class="warn">☀️ Heat advisory: this line is cooking them.</span>`);
+      if (s.raining() && s.isClosed(l.id) && s.loc(l.id).closedBy === "park") notes.push(`<span class="ok">🌧 Closed for lightning. Not your fault!</span>`);
       if (notes.length) html += `<div class="status">${notes.join("<br>")}</div>`;
       if (!s.workerAt(l.node)) html += `<button class="walk" data-walk="1">🚶 Walk here (${Math.ceil(s.walkMinutes(l.node))} min)</button>`;
       else html += `<div class="status ok">You're here.</div>`;
@@ -622,7 +772,8 @@ class Park extends Phaser.Scene {
         $("intro").classList.add("hidden");
         this.renderTools();
         this.running = true;
-        toast("Psst: the gate is right by you. Those scanners look fragile…", 3500);
+        unlock();
+        sfx.done();
       });
     };
     $("intro").classList.remove("hidden");
@@ -637,14 +788,18 @@ class Park extends Phaser.Scene {
     const mult = r.why === "closed" ? "Full-day bonus ×1.5" : r.why === "left" ? "Left early ×1" : "Severance ×0.25";
     $("results-card").innerHTML = `
       <h1>${title}</h1>
+      <div class="grade"><b>${r.grade}</b><span>${esc(r.title)}</span></div>
       <div class="scoreline">${r.score} misery</div>
       <div>${r.misery} raw · ${mult} · ${r.done}/${r.total} of their plans happened · duties ${r.duties}</div>
       ${r.combos.length ? `<p><b>Combos:</b> ${r.combos.map((c) => `<span class="tagline">${esc(c)}</span>`).join(" ")}</p>` : ""}
+      ${r.breakdown.length ? `<div class="breakdown">${r.breakdown.map((b) =>
+        `<div><span>${esc(b.label)}</span><i><b style="width:${Math.round((b.value / r.breakdown[0].value) * 100)}%"></b></i><em>${b.value}</em></div>`).join("")}</div>` : ""}
       <p><b>Their review:</b> <span class="stars">${"★".repeat(r.stars)}${"☆".repeat(5 - r.stars)}</span></p>
       ${r.lines.map((l) => `<blockquote>${esc(l)}</blockquote>`).join("")}
       <p class="memo">${esc(r.memo)}</p>
       <button class="big" id="again">Another day</button>`;
     $("results").classList.remove("hidden");
+    if (r.grade === "F" || r.grade === "D") sfx.sad(); else sfx.combo();
     $("again").addEventListener("click", () => {
       $("results").classList.add("hidden");
       this.select(null);
@@ -657,8 +812,11 @@ class Park extends Phaser.Scene {
     const s = this.sim;
     if (this.running && !s.ended) {
       s.step((dtMs / 1000) * this.speed * GAME_MIN_PER_SEC);
+      this.tickCrowd((dtMs / 1000) * this.speed * GAME_MIN_PER_SEC);
+      this.checkTips();
       if (s.pauses.length) {
         const msg = s.pauses.splice(0).join(" · ");
+        if (msg.includes("duty")) sfx.radio(); else sfx.banner();
         if (this.autoPause && this.speed > 0) this.setSpeed(0);
         toast(`⏸ ${msg}`, 3500);
       }
@@ -668,6 +826,7 @@ class Park extends Phaser.Scene {
       window.setTimeout(() => this.showResults(), 1200);
     }
     this.drainFx();
+    this.updateSky();
     if (this.camFollow) {
       const cam = this.cameras.main, p = iso(s.w.pos.i, s.w.pos.j);
       const k = Math.min(1, dtMs / 250);
