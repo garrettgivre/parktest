@@ -86,6 +86,7 @@ class Park extends Phaser.Scene {
   landLabels: Phaser.GameObjects.Text[] = [];
   trainPhase = 0;
   night!: Phaser.GameObjects.Rectangle;
+  swans: { img: Phaser.GameObjects.Image; f: number; phase: number; speed: number }[] = [];
   glows: Phaser.GameObjects.Image[] = [];
   ground!: { rt: Phaser.GameObjects.RenderTexture; lo: { x: number; y: number }; S: number };
   sprites!: { deb: Phaser.GameObjects.Image; gary: Phaser.GameObjects.Image; me: Phaser.GameObjects.Image; brad: Phaser.GameObjects.Image;
@@ -167,6 +168,7 @@ class Park extends Phaser.Scene {
     this.setupCamera();
     this.bakePawns();
     this.buildNight();
+    this.buildLagoon();
     const sp = (key: string) => this.person(key.replace("p_", ""), key).setDepth(5001);
     this.sprites = {
       deb: sp("p_deb"), gary: sp("p_gary"), me: sp("p_me").setDepth(5002), brad: sp("p_brad"),
@@ -861,6 +863,40 @@ class Park extends Phaser.Scene {
     for (const gl of this.glows) gl.setAlpha(night * gl.getData("a"));
   }
 
+  /** The lagoon: twinkling sun glints on the water and swan boats paddling slow laps. */
+  buildLagoon() {
+    if (!this.textures.exists("glint")) {
+      const g = this.make.graphics({}, false);
+      g.fillStyle(0xffffff, 1).fillEllipse(16, 6, 32, 8);
+      g.generateTexture("glint", 32, 12);
+      g.destroy();
+    }
+    if (!this.textures.exists("swan")) {
+      const g = this.make.graphics({}, false);
+      g.fillStyle(0x000000, 0.2).fillEllipse(34, 44, 60, 16);
+      g.fillStyle(0xf4f6f7, 1).fillEllipse(34, 34, 56, 24);
+      g.fillStyle(0xe8ecee, 1).fillRoundedRect(14, 22, 40, 14, 6);
+      g.lineStyle(8, 0xf4f6f7, 1).beginPath().arc(50, 18, 9, Math.PI * 0.5, Math.PI * 1.6).strokePath();
+      g.fillStyle(0xe8836f, 1).fillTriangle(42, 9, 36, 12, 42, 14);
+      g.fillStyle(0xd35400, 1).fillRect(28, 14, 4, 10);
+      g.generateTexture("swan", 70, 52);
+      g.destroy();
+    }
+    const rnd = (k: number) => { const x = Math.sin(k * 77.7) * 43758.5453; return x - Math.floor(x); };
+    for (let k = 0; k < 70; k++) {
+      const deg = rnd(k) * 360, r = (0.15 + 0.8 * Math.sqrt(rnd(k + 0.5))) * (lagoonR(deg) - 1.2);
+      const u = CENTER.u + r * Math.cos((deg * Math.PI) / 180), v = CENTER.v + r * Math.sin((deg * Math.PI) / 180);
+      const p = uv(u, v);
+      const gl = this.add.image(p.x, p.y, "glint").setBlendMode(Phaser.BlendModes.ADD).setAlpha(0).setDepth(-60).setScale(1 + rnd(k + 0.2));
+      this.tweens.add({ targets: gl, alpha: { from: 0, to: 0.55 }, duration: 900 + rnd(k + 0.3) * 900, yoyo: true, repeat: -1, delay: rnd(k + 0.4) * 3000, hold: 200 });
+    }
+    // Swan boats loop the lagoon at different radii and speeds.
+    this.swans = [0, 1, 2, 3].map((k) => ({
+      img: this.add.image(0, 0, "swan").setDepth(-55).setOrigin(0.5, 0.8),
+      f: 0.45 + k * 0.12, phase: k * 1.7, speed: 0.06 + k * 0.015,
+    }));
+  }
+
   /** Lights for the night: warm lamps on the paths and doors, neon where the land calls for it. */
   buildNight() {
     if (!this.textures.exists("glow")) {
@@ -1366,6 +1402,13 @@ class Park extends Phaser.Scene {
       const cam = this.cameras.main, p = iso(s.w.pos.i, s.w.pos.j);
       const k = Math.min(1, dtMs / 250);
       cam.centerOn(cam.midPoint.x + (p.x - cam.midPoint.x) * k, cam.midPoint.y + (p.y - cam.midPoint.y) * k);
+    }
+    for (const sw of this.swans) {
+      sw.phase += (dtMs / 1000) * sw.speed;
+      const deg = (sw.phase * 180) / Math.PI;
+      const r = lagoonR(deg) * sw.f + 1;
+      const p = uv(CENTER.u + r * Math.cos(sw.phase), CENTER.v + r * Math.sin(sw.phase));
+      sw.img.setPosition(p.x, p.y + Math.sin(this.time.now / 400 + sw.f * 9) * 3).setFlipX(Math.sin(sw.phase) > 0); // texture faces right; moving left when sin > 0
     }
     this.drawDynamic();
     this.updateLabels();
