@@ -21,6 +21,17 @@ import os
 import sys
 from mathutils import Euler, Vector
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from to_webp import convert as _to_webp  # noqa: E402
+
+
+def to_webp(path):
+    _to_webp(path)
+    sc = bpy.context.scene
+    sc.render.image_settings.file_format = "PNG"  # back to PNG for the next render
+    sc.render.image_settings.color_mode = "RGBA"
+
+
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 OUT = os.path.join(ROOT, "public", "sprites", "park")
@@ -109,6 +120,7 @@ def render(name, size=None):
     sc.render.filepath = path
     bpy.ops.render.render(write_still=True)
     cw, ch, ax2, ay2 = autocrop(path, w / 2, ay)
+    to_webp(path)
     manifest["sprites"][name] = {"w": cw, "h": ch, "ax": ax2, "ay": ay2}
     print("rendered", name, cw, "x", ch)
 

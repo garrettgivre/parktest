@@ -21,7 +21,7 @@ npm run art -- emporium bbq  # re-render just these
   per tile of height. This matches the game exactly, so sprites drop straight in.
 - **Lighting:** one warm sun from the upper left, soft sky light, shadow catcher on the
   ground so shadows are baked into each sprite.
-- **Output:** `public/sprites/park/<id>.png` plus `manifest.json` (each sprite's anchor:
+- **Output:** `public/sprites/park/<id>.webp` (rendered as PNG, then converted to WebP: ~5x smaller) plus `manifest.json` (each sprite's anchor:
   the pixel where the footprint centre on the ground lands). The game uses a sprite when
   one exists and falls back to the gray-box block otherwise. Settings ⚙️ has a
   **Gray-box** toggle.

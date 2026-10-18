@@ -18,7 +18,7 @@ const assets = [
     tags: [l.headliner && "headliner", l.wet && "wet", l.vegan && "vegan", l.outdoor && "outdoor", l.mode].filter(Boolean),
   })),
   ...DECOR.map((d, k) => ({
-    id: "decor" + k, name: d.label ?? "storefront", sign: d.label ? sign(d.label) : "", kind: d.label ? "backstage" : d.h < 0.7 ? "prop" : "storefront",
+    id: "decor" + k, name: d.label ?? "storefront", sign: d.label ? sign(d.label) : "", kind: d.label ? "backstage" : d.w < 0.5 || d.h < 0.7 ? "prop" : "storefront",
     zone: d.v > 0 && Math.abs(d.u) < 12 ? "depot" : "backstage", w: d.w, d: d.d, h: d.h,
     color: "#" + d.color.toString(16).padStart(6, "0"), tags: [],
   })),

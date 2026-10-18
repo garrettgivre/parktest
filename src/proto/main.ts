@@ -114,7 +114,7 @@ class Park extends Phaser.Scene {
     this.load.json("parkArt", "sprites/park/manifest.json");
     this.load.once("filecomplete-json-parkArt", () => {
       const m = this.cache.json.get("parkArt") as { sprites: Record<string, unknown> } | undefined;
-      for (const id of Object.keys(m?.sprites ?? {})) this.load.image("spr_" + id, `sprites/park/${id}.png`);
+      for (const id of Object.keys(m?.sprites ?? {})) this.load.image("spr_" + id, `sprites/park/${id}.webp`);
     });
   }
 
