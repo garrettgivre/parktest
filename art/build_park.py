@@ -151,6 +151,9 @@ def autocrop(path, ax, ay, pad=2):
 # ------------------------------------------------------------------ materials
 
 _mats = {}
+# World size (tiles) one copy of each texture covers, so bricks, logs and boards come out real-sized.
+TEX_SIZE = {"brick": 2.2, "stucco": 3.0, "roof_tile": 2.4, "wood": 2.0, "tin": 2.0, "stone": 2.6,
+            "concrete": 3.6, "clapboard": 2.4, "shingle": 2.2, "logs": 3.0, "canvas": 2.6}
 
 
 def lin(c):
@@ -163,9 +166,9 @@ def hexc(s):
 
 
 def mat(name, color, rough=0.75, kind=None, color2=None, scale=4.0, metal=0.0, emit=0.0,
-        grime=0.25, tex=None, tex_size=2.0, glass=0.0):
+        grime=0.25, tex=None, tex_size=None, glass=0.0, tint=0.18, rot=0.0, uv=False):
     """Matte material. If art/textures/<tex>.png exists it is used (tinted by color)."""
-    key = (name, tuple(color), kind, tex)
+    key = (name, tuple(color), kind, tex, rot, uv)
     if key in _mats:
         return _mats[key]
     m = bpy.data.materials.new(name)
@@ -183,17 +186,19 @@ def mat(name, color, rough=0.75, kind=None, color2=None, scale=4.0, metal=0.0, e
     tex_path = os.path.join(TEX, tex + ".png") if tex else None
     if tex_path and os.path.exists(tex_path):
         mp = nt.nodes.new("ShaderNodeMapping")
-        mp.inputs["Scale"].default_value = (1 / tex_size,) * 3
-        link(coord, mp.inputs["Vector"])
+        mp.inputs["Scale"].default_value = (1 / (tex_size or TEX_SIZE.get(tex, 2.0)),) * 3
+        mp.inputs["Rotation"].default_value = (0, 0, math.radians(rot))  # e.g. tin ribs run down the slope
+        # Roofs carry real UVs (laid out in world units along the slope); walls use box projection.
+        link(nt.nodes["Texture Coordinate"].outputs["UV"] if uv else coord, mp.inputs["Vector"])
         it = nt.nodes.new("ShaderNodeTexImage")
         it.image = bpy.data.images.load(tex_path, check_existing=True)
-        it.projection = "BOX"
+        it.projection = "FLAT" if uv else "BOX"
         it.projection_blend = 0.2
         link(mp.outputs["Vector"], it.inputs["Vector"])
         mix = nt.nodes.new("ShaderNodeMix")
         mix.data_type = "RGBA"
         mix.blend_type = "MULTIPLY"
-        mix.inputs[0].default_value = 0.35
+        mix.inputs[0].default_value = tint  # nudge toward the zone colour, keep the texture's own
         link(it.outputs["Color"], mix.inputs[6])
         mix.inputs[7].default_value = c1
         col = mix.outputs[2]
@@ -248,6 +253,8 @@ def mat(name, color, rough=0.75, kind=None, color2=None, scale=4.0, metal=0.0, e
         rgb = nt.nodes.new("ShaderNodeRGB")
         rgb.outputs[0].default_value = c1
         col = rgb.outputs[0]
+    if tex_path and os.path.exists(tex_path):
+        grime *= 0.4
     if grime:
         n = nt.nodes.new("ShaderNodeTexNoise")
         link(coord, n.inputs["Vector"])
@@ -356,8 +363,16 @@ def gable(w, d, z, rise, material, overhang=0.12):
     bm = bmesh.new()
     hw, hd = w / 2 + overhang, d / 2 + overhang
     v = [bm.verts.new(p) for p in [(-hw, -hd, z), (hw, -hd, z), (hw, hd, z), (-hw, hd, z), (-hw, 0, z + rise), (hw, 0, z + rise)]]
-    for f in [(0, 1, 5, 4), (3, 4, 5, 2), (0, 4, 3), (1, 2, 5), (0, 3, 2, 1)]:
-        bm.faces.new([v[k] for k in f])
+    faces = [bm.faces.new([v[k] for k in f]) for f in [(0, 1, 5, 4), (3, 4, 5, 2), (0, 4, 3), (1, 2, 5), (0, 3, 2, 1)]]
+    uvl = bm.loops.layers.uv.new()
+    slope = math.hypot(hd, rise)
+    for k, f in enumerate(faces):
+        for loop in f.loops:
+            x, y, zz = loop.vert.co
+            if k < 2:  # the two slopes: v runs from the eave (0) up to the ridge
+                loop[uvl].uv = (x, slope * (1 - abs(y) / hd))
+            else:
+                loop[uvl].uv = (y, zz)
     bm.to_mesh(mesh)
     o = bpy.data.objects.new("gable", mesh)
     bpy.context.scene.collection.objects.link(o)
@@ -397,7 +412,7 @@ def style(zone):
                          trim=WHITE, roof=mat("terracotta", (0.7, 0.33, 0.2), kind="tin", color2=(0.6, 0.27, 0.16), scale=8, tex="roof_tile"),
                          accent=solid((0.2, 0.4, 0.6)), roof_type="hip", sign=(WHITE, solid((0.2, 0.3, 0.5)))),
         "bonewars": dict(wall=mat("planks", (0.45, 0.32, 0.2), kind="planks", color2=(0.35, 0.24, 0.15), scale=6, tex="wood"),
-                         trim=solid((0.3, 0.2, 0.12)), roof=mat("tinroof", (0.55, 0.57, 0.58), kind="tin", color2=(0.45, 0.46, 0.47), scale=14, metal=0.4, tex="tin"),
+                         trim=solid((0.3, 0.2, 0.12)), roof=mat("tinroof", (0.55, 0.57, 0.58), kind="tin", color2=(0.45, 0.46, 0.47), scale=14, metal=0.4, tex="tin", uv=True),
                          accent=solid((0.9, 0.88, 0.8)), roof_type="gable", sign=(solid((0.85, 0.75, 0.55)), solid((0.3, 0.15, 0.08)))),
         "fossil": dict(wall=mat("rock", (0.6, 0.53, 0.42), kind="speckle", color2=(0.45, 0.4, 0.32), scale=6, tex="stone"),
                        trim=solid((0.92, 0.9, 0.8)), roof=mat("leafy", (0.25, 0.5, 0.18), kind="speckle", color2=(0.35, 0.62, 0.22), scale=10),
@@ -420,10 +435,10 @@ def style(zone):
                      trim=neon((0.6, 0.5, 1.0)), roof=solid((0.95, 0.95, 1.0)), accent=solid((0.95, 0.95, 1.0)), roof_type="flat",
                      sign=(solid((0.95, 0.95, 1.0)), solid((0.45, 0.3, 0.8)))),
         "lagoon": dict(wall=mat("clapboard", (0.45, 0.65, 0.78), kind="planks", color2=(0.38, 0.56, 0.68), scale=10, tex="clapboard"),
-                       trim=WHITE, roof=mat("shingle", (0.32, 0.3, 0.32), kind="tin", color2=(0.26, 0.25, 0.27), scale=12, tex="shingle"),
+                       trim=WHITE, roof=mat("shingle", (0.32, 0.3, 0.32), kind="tin", color2=(0.26, 0.25, 0.27), scale=12, tex="shingle", uv=True),
                        accent=solid((0.9, 0.3, 0.2)), roof_type="gable", sign=(WHITE, solid((0.1, 0.3, 0.5)))),
         "ozark": dict(wall=mat("logs", (0.5, 0.33, 0.18), kind="planks", color2=(0.4, 0.26, 0.14), scale=5, tex="logs"),
-                      trim=solid((0.2, 0.35, 0.2)), roof=mat("greentin", (0.22, 0.4, 0.24), kind="tin", color2=(0.18, 0.33, 0.2), scale=14, metal=0.3, tex="tin"),
+                      trim=solid((0.2, 0.35, 0.2)), roof=mat("greentin", (0.22, 0.4, 0.24), kind="tin", color2=(0.18, 0.33, 0.2), scale=14, metal=0.3, tex="tin", uv=True, tint=0.55),
                       accent=solid((0.95, 0.85, 0.5)), roof_type="gable", sign=(solid((0.95, 0.88, 0.6)), solid((0.2, 0.3, 0.15)))),
     }
     return S.get(zone, S["depot"])
@@ -551,7 +566,9 @@ def ride(a, st):
         return
     if kind == "dark":
         hw = building(a, st, h_wall=a["h"] * 0.9)
-        box((w * 0.5, 0.3, 0.9), (-w * 0.15, -d / 2 - 0.15, 0.45), st["trim"])  # entrance portal
+        for x in (-w * 0.38, w * 0.08):  # entrance gate: two posts and a header
+            box((0.12, 0.12, 1.0), (x, -d / 2 - 0.3, 0.5), st["trim"], bevel=0.02)
+        box((w * 0.6, 0.16, 0.18), (-w * 0.15, -d / 2 - 0.3, 1.04), st["trim"], bevel=0.02)
         if rid == "trex":
             ball(0.6, (0.3, -d / 2 + 0.2, hw + 0.4), solid((0.2, 0.55, 0.25)), scale=(1.4, 0.9, 0.8))
             for k in range(4):
@@ -684,16 +701,23 @@ def storefront(a, st):
     w, d, h = a["w"], a["d"], a["h"]
     import random
     rnd = random.Random(a["id"])
-    wall = mat("front_" + a["color"], hexc(a["color"]), kind="brick", color2=tuple(v * 0.85 for v in hexc(a["color"])), scale=3, tex="brick")
+    wall = mat("front_" + a["color"], hexc(a["color"]), kind="brick", color2=tuple(v * 0.85 for v in hexc(a["color"])), scale=3, tex="brick", tint=0.45)
     box((w, d, h), (0, 0, h / 2), wall, bevel=0.02)
     box((w + 0.06, d + 0.06, 0.1), (0, 0, h), CREAM)
     box((w * 0.3, d + 0.02, h * 0.18), (0, 0, h + 0.09), wall)  # false front
     awn_cols = [(0.12, 0.35, 0.22), (0.6, 0.12, 0.1), (0.15, 0.25, 0.5), (0.85, 0.65, 0.15)]
     c = awn_cols[rnd.randrange(4)]
-    box((0.03, d * 0.75, 0.38), (w / 2 + 0.01, 0, 0.32), GLASS)
-    box((0.42, d * 0.8, 0.04), (w / 2 + 0.2, 0, 0.7), mat("awn" + str(c), c, kind="stripes", color2=(0.95, 0.93, 0.88), scale=8, grime=0.1), rot=(0, math.radians(18), 0))
-    for k in range(2):
-        box((0.03, d * 0.25, 0.22), (w / 2 + 0.01, -d * 0.25 + k * d * 0.5, h * 0.75), GLASS)
+    awn = mat("awn" + str(c), c, kind="stripes", color2=(0.95, 0.93, 0.88), scale=8, grime=0.1)
+    if "right" in a["tags"]:  # right side of the street: shopfront faces the street on the -y face
+        box((w * 0.75, 0.03, 0.38), (0, -d / 2 - 0.01, 0.32), GLASS)
+        box((w * 0.8, 0.42, 0.04), (0, -d / 2 - 0.2, 0.7), awn, rot=(math.radians(-18), 0, 0))
+        for k in range(2):
+            box((w * 0.25, 0.03, 0.22), (-w * 0.25 + k * w * 0.5, -d / 2 - 0.01, h * 0.75), GLASS)
+    else:  # left side: shopfront on the +x face
+        box((0.03, d * 0.75, 0.38), (w / 2 + 0.01, 0, 0.32), GLASS)
+        box((0.42, d * 0.8, 0.04), (w / 2 + 0.2, 0, 0.7), awn, rot=(0, math.radians(18), 0))
+        for k in range(2):
+            box((0.03, d * 0.25, 0.22), (w / 2 + 0.01, -d * 0.25 + k * d * 0.5, h * 0.75), GLASS)
 
 
 def prop(a, st):

@@ -215,10 +215,9 @@ button {
 
 #sky {
   position: fixed; inset: 0; pointer-events: none; z-index: 1;
-  background: rgba(16, 20, 64, var(--night, 0));
   transition: background 1s;
 }
-#sky.heat { background: linear-gradient(rgba(255, 140, 0, 0.10), rgba(255, 140, 0, 0.04)), rgba(16, 20, 64, var(--night, 0)); }
+#sky.heat { background: linear-gradient(rgba(255, 140, 0, 0.10), rgba(255, 140, 0, 0.04)); }
 #sky.rain {
   background-color: rgba(40, 60, 90, 0.25);
   background-image: repeating-linear-gradient(105deg, rgba(200, 220, 255, 0.28) 0 2px, transparent 2px 22px);

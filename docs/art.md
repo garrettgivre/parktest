@@ -77,6 +77,24 @@ Subjects for each file:
 - **logs:** stacked horizontal round logs with chinking, cabin wall
 - **canvas:** red and white vertical striped circus tent canvas, a little dirty
 
+### Ground textures
+
+The ground uses the same `art/textures/` folder. `npm run ground` bakes each one into a
+seamless isometric tile (`public/sprites/ground/`), and the game paints the zones with it.
+Already in use: **brick** (Depot Street pavers), **stone** (Passport/Fossil flagstones,
+scorched in Extinction Junction), **concrete** (Tomorrow Mall), **wood** (Boardwalk and
+Pier). Add these to cover the rest:
+
+| File | Used for | Subject |
+|---|---|---|
+| `grass.png` | lawns everywhere | short mowed lawn grass, a few clover patches, slightly uneven |
+| `sand.png` | Landlocked Lagoon | fine beach sand with faint footprints and a couple of shells |
+| `pavers.png` | Atomic Acres, Aero Heights, Mirrorball Mile | square light gray concrete paving tiles with thin grout lines |
+| `asphalt.png` | Lot Z | worn dark gray asphalt with small cracks and faded oil stains |
+
+Use the same template, but say **"seen from directly above, flat ground texture"**
+instead of "front-on view".
+
 Signs, posters and menu boards come next; they'll use the same template with "flat
 graphic sign" instead of "texture".
 

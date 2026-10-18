@@ -11,7 +11,8 @@
     "balance": "esbuild tools/balance.ts --bundle --platform=node --log-level=warning --outfile=node_modules/.cache/balance.cjs && node node_modules/.cache/balance.cjs",
     "assets": "esbuild tools/export-assets.ts --bundle --platform=node --log-level=warning --outfile=node_modules/.cache/assets.cjs && node node_modules/.cache/assets.cjs",
     "art": "node art/art.mjs",
-    "people": "node art/art.mjs --people"
+    "people": "node art/art.mjs --people",
+    "ground": "node art/art.mjs --ground"
   },
   "dependencies": {
     "phaser": "^3.90.0"

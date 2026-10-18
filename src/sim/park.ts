@@ -438,8 +438,8 @@ export const DECOR: Decor[] = [];
   const fronts = [0xa0522d, 0x8b4513, 0xb5651d, 0xcd853f, 0x9e5b40, 0x7b3f00, 0xc19a6b, 0xd2b48c];
   let n = 0;
   for (const side of [-1, 1]) {
-    for (let v = DEPOT_V - 1; v <= GATE_V - 5; v += 3.1) {
-      DECOR.push({ u: side * 10.5, v, w: 1.3, d: 2.6, h: 0.8 + hash(++n) * 0.6, color: fronts[n % fronts.length] });
+    for (let v = DEPOT_V; v <= GATE_V - 5; v += 4.4) {
+      DECOR.push({ u: side * 10.8, v, w: 1.7, d: 1.7, h: 0.85 + hash(++n) * 0.55, color: fronts[n % fronts.length] });
     }
   }
   for (let k = -2; k <= 2; k++) DECOR.push({ u: k * 1.6, v: GATE_V - 3, w: 0.35, d: 0.35, h: 0.8, color: 0x7f8c8d });

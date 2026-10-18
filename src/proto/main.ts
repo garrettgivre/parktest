@@ -85,6 +85,8 @@ class Park extends Phaser.Scene {
   locLabels: Record<string, Phaser.GameObjects.Text> = {};
   landLabels: Phaser.GameObjects.Text[] = [];
   trainPhase = 0;
+  night!: Phaser.GameObjects.Rectangle;
+  glows: Phaser.GameObjects.Image[] = [];
   ground!: { rt: Phaser.GameObjects.RenderTexture; lo: { x: number; y: number }; S: number };
   sprites!: { deb: Phaser.GameObjects.Image; gary: Phaser.GameObjects.Image; me: Phaser.GameObjects.Image; brad: Phaser.GameObjects.Image;
     // last positions, for facing and walk animation
@@ -113,6 +115,11 @@ class Park extends Phaser.Scene {
   /** Load rendered building sprites if they exist (npm run art). Missing ones fall back to gray-box. */
   preload() {
     if (GRAYBOX) return;
+    this.load.json("groundArt", "sprites/ground/manifest.json");
+    this.load.once("filecomplete-json-groundArt", () => {
+      const m = this.cache.json.get("groundArt") as { textures: Record<string, unknown> } | undefined;
+      for (const k of Object.keys(m?.textures ?? {})) this.load.image("gnd_" + k, `sprites/ground/${k}.webp`);
+    });
     this.load.json("peopleArt", "sprites/people/manifest.json");
     this.load.once("filecomplete-json-peopleArt", () => {
       const m = this.cache.json.get("peopleArt") as { frameW: number; frameH: number; people: string[] } | undefined;
@@ -159,6 +166,7 @@ class Park extends Phaser.Scene {
 
     this.setupCamera();
     this.bakePawns();
+    this.buildNight();
     const sp = (key: string) => this.person(key.replace("p_", ""), key).setDepth(5001);
     this.sprites = {
       deb: sp("p_deb"), gary: sp("p_gary"), me: sp("p_me").setDepth(5002), brad: sp("p_brad"),
@@ -477,6 +485,76 @@ class Park extends Phaser.Scene {
     rt.draw(gg);
     this.ground = { rt, lo, S };
     gg.destroy();
+    this.paintSurfaces(lo, W, H, S);
+  }
+
+  /** Surface (texture + colour wash) for a ground point, or null to keep the painted colour. */
+  surfaceAt(u: number, v: number): { surf: string; tint: number; a: number } | null {
+    const noise = (x: number, y: number) => 0.5 * Math.sin(x * 1.7 + Math.sin(y * 1.3)) + 0.5 * Math.sin(y * 2.1 + Math.sin(x * 0.9));
+    const has = (k: string) => this.textures.exists("gnd_" + k);
+    const LAND: Partial<Record<string, [string, number, number]>> = {
+      depot: ["brick", 0xc9ae86, 0.12], passport: ["stone", 0xe2c35a, 0.3], fossil: ["stone", 0x8fb85a, 0.45],
+      atomic: ["pavers", 0x9d8fd0, 0.35], aero: ["pavers", 0xc6dde4, 0.35], mirrorball: ["pavers", 0xd58ad8, 0.4],
+      lagoon: ["sand", 0xd8cc9c, 0.1],
+      // blends with a surface of their own
+      extinction: ["stone", 0x2f2826, 0.55], mall: ["concrete", 0xb08fc4, 0.12], foam: ["wood", 0xc4b9d8, 0.15], ozark: ["wood", 0xa9b98a, 0.08],
+    };
+    if (Math.abs(u) < 11 && v > DEPOT_V - 2 && v < GATE_V + 4) return has("brick") ? { surf: "brick", tint: 0xc9ae86, a: 0.12 } : null;
+    if (v >= GATE_V + 4) return has("asphalt") ? { surf: "asphalt", tint: 0x3d3d42, a: 0.1 } : null;
+    const du = u - CENTER.u, dv = v - CENTER.v, r = Math.hypot(du, dv);
+    const deg = (Math.atan2(dv, du) * 180) / Math.PI, n = noise(u * 0.12, v * 0.12);
+    if (r < lagoonR(deg) + 0.9 || r > shapeR(deg) * 2.0 + n * 3) return null;
+    let zone = ZONES[zoneAtAngle(deg + n * 7)];
+    if (zone.kind === "blend" && !(LAND[zone.id] && has(LAND[zone.id]![0]))) {
+      // Blends without their own surface patch between their two lands' surfaces.
+      const off = (((deg + n * 7 - zone.angle! + 540) % 360) - 180) / zone.span! + 0.5;
+      zone = ZONES[off + noise(u * 0.8, v * 0.8) * 0.35 > 0.5 ? zone.parents![1] : zone.parents![0]];
+    }
+    const s2 = LAND[zone.id];
+    return s2 && has(s2[0]) ? { surf: s2[0], tint: s2[1], a: s2[2] } : null;
+  }
+
+  /** Lay textured surfaces (brick street, flagstones, boardwalk...) over the painted ground. */
+  paintSurfaces(lo: { x: number; y: number }, W: number, H: number, S: number) {
+    const gm = this.cache.json.get("groundArt") as { textures: Record<string, unknown> } | undefined;
+    if (!gm || !Object.keys(gm.textures).some((k) => this.textures.exists("gnd_" + k))) return;
+    const cv = this.textures.createCanvas("groundSurf", W, H)!;
+    const ctx = cv.getContext();
+    const pats: Record<string, CanvasPattern> = {};
+    for (const k of Object.keys(gm.textures)) {
+      if (!this.textures.exists("gnd_" + k)) continue;
+      const p = ctx.createPattern(this.textures.get("gnd_" + k).getSourceImage() as HTMLImageElement, "repeat")!;
+      p.setTransform(new DOMMatrix().translate(-lo.x * S, -lo.y * S).scale(S));
+      pats[k] = p;
+    }
+    // One path per (surface, wash) so overlapping cell edges never double up.
+    const groups = new Map<string, { path: Path2D; surf: string; tint: number; a: number }>();
+    for (let i = Math.floor((-95 - 45) / 2); i <= Math.ceil((95 + LOT_V + 22) / 2); i++) {
+      for (let j = Math.floor((-45 - 95) / 2); j <= Math.ceil((LOT_V + 22 + 95) / 2); j++) {
+        const sf = this.surfaceAt(i - j, i + j + 1);
+        if (!sf) continue;
+        const key = `${sf.surf}|${sf.tint}|${sf.a}`;
+        let gr = groups.get(key);
+        if (!gr) { gr = { path: new Path2D(), ...sf }; groups.set(key, gr); }
+        const c = iso(i + 0.5, j + 0.5);
+        const q = [iso(i - 0.02, j - 0.02), iso(i + 1.02, j - 0.02), iso(i + 1.02, j + 1.02), iso(i - 0.02, j + 1.02)];
+        gr.path.moveTo((q[0].x - lo.x) * S, (q[0].y - lo.y) * S);
+        for (const p2 of q.slice(1)) gr.path.lineTo((p2.x - lo.x) * S, (p2.y - lo.y) * S);
+        gr.path.closePath();
+        void c;
+      }
+    }
+    for (const gr of groups.values()) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = pats[gr.surf];
+      ctx.fill(gr.path);
+      ctx.globalAlpha = gr.a;
+      ctx.fillStyle = "#" + gr.tint.toString(16).padStart(6, "0");
+      ctx.fill(gr.path);
+    }
+    cv.refresh();
+    this.ground.rt.stamp("groundSurf", undefined, 0, 0, { originX: 0, originY: 0 });
+    this.textures.remove("groundSurf");
   }
 
   /** Trees fill every gap that isn't a path, a building or water, plus a berm around the edge. */
@@ -778,7 +856,52 @@ class Park extends Phaser.Scene {
     this.lastSky = key;
     const el = $("sky");
     el.className = cls;
-    el.style.setProperty("--night", String(night * 0.42));
+    // Night happens inside the game now: a multiply tint over the park, with lights glowing through it.
+    this.night.setAlpha(night * 0.62);
+    for (const gl of this.glows) gl.setAlpha(night * gl.getData("a"));
+  }
+
+  /** Lights for the night: warm lamps on the paths and doors, neon where the land calls for it. */
+  buildNight() {
+    if (!this.textures.exists("glow")) {
+      const c = this.textures.createCanvas("glow", 128, 128)!;
+      const ctx = c.getContext();
+      const grad = ctx.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0, "rgba(255,255,255,1)");
+      grad.addColorStop(0.35, "rgba(255,255,255,0.45)");
+      grad.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 128, 128);
+      c.refresh();
+    }
+    const lo = uv(-95, -45), hi = uv(95, LOT_V + 22);
+    this.night = this.add.rectangle(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y, 0x1b2456).setOrigin(0, 0)
+      .setBlendMode(Phaser.BlendModes.MULTIPLY).setDepth(5500).setAlpha(0);
+    this.glows = [];
+    const NEON: Partial<Record<string, number[]>> = {
+      mirrorball: [0xff4fd8, 0x5ff2ff], y2k: [0xd7a8ff, 0x8fe8ff], mall: [0xff5fb0, 0x5fffe8], aero: [0x8fd8ff],
+      extinction: [0xff7a1a], foam: [0xc9a8ff], expo: [0xffd27a],
+    };
+    const glow = (i: number, j: number, color: number, size: number, a: number) => {
+      const p = iso(i, j);
+      const g = this.add.image(p.x, p.y, "glow").setTint(color).setBlendMode(Phaser.BlendModes.ADD)
+        .setScale(size, size / 2).setDepth(5600).setAlpha(0).setData("a", a);
+      this.glows.push(g);
+      this.cullables.push({ obj: g, x0: p.x - 64 * size, y0: p.y - 32 * size, x1: p.x + 64 * size, y1: p.y + 32 * size });
+    };
+    for (const n of Object.values(NODES)) {
+      if (/^t\d+$/.test(n.id) || n.id === "island") continue;
+      glow(n.i, n.j, 0xffd9a0, 4.2, 0.55);
+    }
+    for (const l of LOCS) {
+      const d = this.doorPoint(l), cols = NEON[l.zone];
+      const col = cols ? cols[(l.id.length) % cols.length] : 0xffc878;
+      glow(d.i, d.j, col, cols ? 5.5 : 3.6, cols ? 0.85 : 0.6);
+    }
+    for (const m of LANDMARKS) {
+      const i = (m.u + m.v) / 2, j = (m.v - m.u) / 2, cols = NEON[m.zone];
+      glow(i, j, cols ? cols[0] : 0xfff0c0, 6, 0.7);
+    }
   }
 
   icon(k: number, text: string, x: number, y: number, size = 56) {

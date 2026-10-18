@@ -20,7 +20,7 @@ const assets = [
   ...DECOR.map((d, k) => ({
     id: "decor" + k, name: d.label ?? "storefront", sign: d.label ? sign(d.label) : "", kind: d.label ? "backstage" : d.w < 0.5 || d.h < 0.7 ? "prop" : "storefront",
     zone: d.v > 0 && Math.abs(d.u) < 12 ? "depot" : "backstage", w: d.w, d: d.d, h: d.h,
-    color: "#" + d.color.toString(16).padStart(6, "0"), tags: [],
+    color: "#" + d.color.toString(16).padStart(6, "0"), tags: [d.u > 0 ? "right" : "left"],
   })),
   ...LANDMARKS.map((m, k) => ({
     id: "landmark" + k, name: m.icon, sign: "", kind: "landmark", zone: m.zone, w: 0.9, d: 0.9, h: m.h,

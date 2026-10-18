@@ -833,11 +833,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 0.9953668562331587,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.0290862848803954,
    "color": "#8b4513",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor1",
@@ -845,11 +847,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.2854238177547814,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.294971832941883,
    "color": "#b5651d",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor2",
@@ -857,11 +861,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.235706191083591,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.249397341826625,
    "color": "#cd853f",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor3",
@@ -869,11 +875,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.336829038518772,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.3420932853088743,
    "color": "#9e5b40",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor4",
@@ -881,11 +889,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.11106787968165,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.1351455563748458,
    "color": "#7b3f00",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor5",
@@ -893,11 +903,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.1269480002258205,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.1497023335403356,
    "color": "#c19a6b",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor6",
@@ -905,11 +917,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.028666038756637,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.0596105355269174,
    "color": "#d2b48c",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor7",
@@ -917,11 +931,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 0.9234843857499073,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 0.9631940202707483,
    "color": "#a0522d",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor8",
@@ -929,11 +945,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 0.9394950085865276,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 0.9778704245376503,
    "color": "#8b4513",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor9",
@@ -941,11 +959,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 0.8157119366092958,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 0.864402608558521,
    "color": "#b5651d",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor10",
@@ -953,11 +973,13 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.2422701271994812,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.255414283266191,
    "color": "#cd853f",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor11",
@@ -965,146 +987,86 @@
    "sign": "",
    "kind": "storefront",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.0059870197655982,
+   "w": 1.7,
+   "d": 1.7,
+   "h": 1.0388214347851317,
    "color": "#9e5b40",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor12",
    "name": "storefront",
    "sign": "",
-   "kind": "storefront",
+   "kind": "prop",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.0545007646238447,
-   "color": "#7b3f00",
-   "tags": []
+   "w": 0.35,
+   "d": 0.35,
+   "h": 0.8,
+   "color": "#7f8c8d",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor13",
    "name": "storefront",
    "sign": "",
-   "kind": "storefront",
+   "kind": "prop",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.249374449516472,
-   "color": "#c19a6b",
-   "tags": []
+   "w": 0.35,
+   "d": 0.35,
+   "h": 0.8,
+   "color": "#7f8c8d",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor14",
    "name": "storefront",
    "sign": "",
-   "kind": "storefront",
+   "kind": "prop",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.3613198723178357,
-   "color": "#d2b48c",
-   "tags": []
+   "w": 0.35,
+   "d": 0.35,
+   "h": 0.8,
+   "color": "#7f8c8d",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor15",
    "name": "storefront",
    "sign": "",
-   "kind": "storefront",
+   "kind": "prop",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.0714092944574076,
-   "color": "#a0522d",
-   "tags": []
+   "w": 0.35,
+   "d": 0.35,
+   "h": 0.8,
+   "color": "#7f8c8d",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor16",
    "name": "storefront",
    "sign": "",
-   "kind": "storefront",
+   "kind": "prop",
    "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.1031752084832989,
-   "color": "#8b4513",
-   "tags": []
+   "w": 0.35,
+   "d": 0.35,
+   "h": 0.8,
+   "color": "#7f8c8d",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor17",
-   "name": "storefront",
-   "sign": "",
-   "kind": "storefront",
-   "zone": "depot",
-   "w": 1.3,
-   "d": 2.6,
-   "h": 1.2463429821225873,
-   "color": "#b5651d",
-   "tags": []
-  },
-  {
-   "id": "decor18",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.35,
-   "d": 0.35,
-   "h": 0.8,
-   "color": "#7f8c8d",
-   "tags": []
-  },
-  {
-   "id": "decor19",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.35,
-   "d": 0.35,
-   "h": 0.8,
-   "color": "#7f8c8d",
-   "tags": []
-  },
-  {
-   "id": "decor20",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.35,
-   "d": 0.35,
-   "h": 0.8,
-   "color": "#7f8c8d",
-   "tags": []
-  },
-  {
-   "id": "decor21",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.35,
-   "d": 0.35,
-   "h": 0.8,
-   "color": "#7f8c8d",
-   "tags": []
-  },
-  {
-   "id": "decor22",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.35,
-   "d": 0.35,
-   "h": 0.8,
-   "color": "#7f8c8d",
-   "tags": []
-  },
-  {
-   "id": "decor23",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
@@ -1113,10 +1075,12 @@
    "d": 1.5,
    "h": 0.55,
    "color": "#8e44ad",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
-   "id": "decor24",
+   "id": "decor18",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
@@ -1125,10 +1089,12 @@
    "d": 1.5,
    "h": 0.55,
    "color": "#c0392b",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
-   "id": "decor25",
+   "id": "decor19",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
@@ -1137,7 +1103,93 @@
    "d": 1.5,
    "h": 0.55,
    "color": "#7f8c8d",
-   "tags": []
+   "tags": [
+    "left"
+   ]
+  },
+  {
+   "id": "decor20",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "backstage",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#7f8c8d",
+   "tags": [
+    "left"
+   ]
+  },
+  {
+   "id": "decor21",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#8e44ad",
+   "tags": [
+    "left"
+   ]
+  },
+  {
+   "id": "decor22",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#7f8c8d",
+   "tags": [
+    "left"
+   ]
+  },
+  {
+   "id": "decor23",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#2c3e50",
+   "tags": [
+    "left"
+   ]
+  },
+  {
+   "id": "decor24",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#27ae60",
+   "tags": [
+    "right"
+   ]
+  },
+  {
+   "id": "decor25",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#2980b9",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor26",
@@ -1149,55 +1201,65 @@
    "d": 1.5,
    "h": 0.55,
    "color": "#7f8c8d",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor27",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "depot",
+   "zone": "backstage",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#8e44ad",
-   "tags": []
+   "color": "#2c3e50",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor28",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "depot",
+   "zone": "backstage",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#7f8c8d",
-   "tags": []
+   "color": "#27ae60",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor29",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "depot",
+   "zone": "backstage",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#2c3e50",
-   "tags": []
+   "color": "#c0392b",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor30",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "depot",
+   "zone": "backstage",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#27ae60",
-   "tags": []
+   "color": "#2c3e50",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor31",
@@ -1208,95 +1270,27 @@
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#2980b9",
-   "tags": []
+   "color": "#f1c40f",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor32",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "backstage",
+   "zone": "depot",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#7f8c8d",
-   "tags": []
+   "color": "#c0392b",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor33",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "backstage",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#2c3e50",
-   "tags": []
-  },
-  {
-   "id": "decor34",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "backstage",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#27ae60",
-   "tags": []
-  },
-  {
-   "id": "decor35",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "backstage",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#c0392b",
-   "tags": []
-  },
-  {
-   "id": "decor36",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "backstage",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#2c3e50",
-   "tags": []
-  },
-  {
-   "id": "decor37",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#f1c40f",
-   "tags": []
-  },
-  {
-   "id": "decor38",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#c0392b",
-   "tags": []
-  },
-  {
-   "id": "decor39",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
@@ -1305,7 +1299,93 @@
    "d": 1.5,
    "h": 0.55,
    "color": "#ecf0f1",
-   "tags": []
+   "tags": [
+    "right"
+   ]
+  },
+  {
+   "id": "decor34",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#8e44ad",
+   "tags": [
+    "right"
+   ]
+  },
+  {
+   "id": "decor35",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#8e44ad",
+   "tags": [
+    "right"
+   ]
+  },
+  {
+   "id": "decor36",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "depot",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#7f8c8d",
+   "tags": [
+    "right"
+   ]
+  },
+  {
+   "id": "decor37",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "backstage",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#27ae60",
+   "tags": [
+    "right"
+   ]
+  },
+  {
+   "id": "decor38",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "backstage",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#c0392b",
+   "tags": [
+    "left"
+   ]
+  },
+  {
+   "id": "decor39",
+   "name": "storefront",
+   "sign": "",
+   "kind": "prop",
+   "zone": "backstage",
+   "w": 0.8,
+   "d": 1.5,
+   "h": 0.55,
+   "color": "#2980b9",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor40",
@@ -1316,8 +1396,10 @@
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#8e44ad",
-   "tags": []
+   "color": "#f1c40f",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor41",
@@ -1328,8 +1410,10 @@
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#8e44ad",
-   "tags": []
+   "color": "#2980b9",
+   "tags": [
+    "left"
+   ]
   },
   {
    "id": "decor42",
@@ -1340,32 +1424,38 @@
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#7f8c8d",
-   "tags": []
+   "color": "#2980b9",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor43",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "backstage",
+   "zone": "depot",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#27ae60",
-   "tags": []
+   "color": "#7f8c8d",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor44",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "backstage",
+   "zone": "depot",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#c0392b",
-   "tags": []
+   "color": "#8e44ad",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor45",
@@ -1376,95 +1466,27 @@
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#2980b9",
-   "tags": []
+   "color": "#f1c40f",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor46",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
-   "zone": "depot",
+   "zone": "backstage",
    "w": 0.8,
    "d": 1.5,
    "h": 0.55,
-   "color": "#f1c40f",
-   "tags": []
+   "color": "#8e44ad",
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "decor47",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#2980b9",
-   "tags": []
-  },
-  {
-   "id": "decor48",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#2980b9",
-   "tags": []
-  },
-  {
-   "id": "decor49",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#7f8c8d",
-   "tags": []
-  },
-  {
-   "id": "decor50",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "depot",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#8e44ad",
-   "tags": []
-  },
-  {
-   "id": "decor51",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "backstage",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#f1c40f",
-   "tags": []
-  },
-  {
-   "id": "decor52",
-   "name": "storefront",
-   "sign": "",
-   "kind": "prop",
-   "zone": "backstage",
-   "w": 0.8,
-   "d": 1.5,
-   "h": 0.55,
-   "color": "#8e44ad",
-   "tags": []
-  },
-  {
-   "id": "decor53",
    "name": "Maintenance (Employees Only)",
    "sign": "MAINTENANCE",
    "kind": "backstage",
@@ -1473,10 +1495,12 @@
    "d": 3,
    "h": 1.5,
    "color": "#7f8c8d",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
-   "id": "decor54",
+   "id": "decor48",
    "name": "Brad's Office",
    "sign": "BRAD'S OFFICE",
    "kind": "backstage",
@@ -1485,10 +1509,12 @@
    "d": 2,
    "h": 1.2,
    "color": "#95a5a6",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
-   "id": "decor55",
+   "id": "decor49",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
@@ -1497,10 +1523,12 @@
    "d": 1.1,
    "h": 0.5,
    "color": "#ecf0f1",
-   "tags": []
+   "tags": [
+    "left"
+   ]
   },
   {
-   "id": "decor56",
+   "id": "decor50",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
@@ -1509,10 +1537,12 @@
    "d": 1.1,
    "h": 0.5,
    "color": "#ecf0f1",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
-   "id": "decor57",
+   "id": "decor51",
    "name": "storefront",
    "sign": "",
    "kind": "prop",
@@ -1521,7 +1551,9 @@
    "d": 1.1,
    "h": 0.5,
    "color": "#ecf0f1",
-   "tags": []
+   "tags": [
+    "right"
+   ]
   },
   {
    "id": "landmark0",
