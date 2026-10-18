@@ -1,6 +1,9 @@
 import Phaser from "phaser";
 import { COMBOS, TOOL, TOOLS, TRAITS, ToolId } from "../sim/content";
-import { EDGES, LAKE, LANDS, LOC, LOCS, LocDef, NODES, SERVICE, shortest } from "../sim/park";
+import {
+  BRIDGES, CENTER, DECOR, DEPOT_V, EDGES, GATE_V, HUB_V, LANDMARKS, LOC, LOCS, LocDef, LOT_V, NODES, RING_IDS, SERVICE,
+  ZONES, ZoneId, lagoonR, ringPos, shapeR, shortest, zoneAtAngle,
+} from "../sim/park";
 import { isMuted, setMuted, sfx, unlock } from "./sfx";
 import { ActionView, OPEN, Sim, Target, fmtTime } from "../sim/sim";
 
@@ -80,6 +83,8 @@ class Park extends Phaser.Scene {
   dyn!: Phaser.GameObjects.Graphics;
   locLabels: Record<string, Phaser.GameObjects.Text> = {};
   landLabels: Phaser.GameObjects.Text[] = [];
+  trainPhase = 0;
+  skyPhase = 0;
   bubble!: Phaser.GameObjects.Text;
   icons!: Phaser.GameObjects.Text[];
   lastSide = "";
@@ -113,7 +118,7 @@ class Park extends Phaser.Scene {
     }).setOrigin(0.5, 1).setDepth(8000).setVisible(false);
 
     this.setupCamera();
-    const ids = Object.keys(NODES);
+    const ids = Object.keys(NODES).filter((id) => !/^t\d+$/.test(id) && id !== "lot");
     this.crowd = Array.from({ length: CROWD }, (_, k) => {
       const n = NODES[ids[k % ids.length]];
       return { pos: { i: n.i + Math.random() - 0.5, j: n.j + Math.random() - 0.5 }, route: [], prev: n.id, color: SHIRTS[k % SHIRTS.length] };
@@ -192,10 +197,10 @@ class Park extends Phaser.Scene {
 
   setupCamera() {
     const cam = this.cameras.main;
-    const lo = uv(-56, -14), hi = uv(56, 90);
+    const lo = uv(-82, -30), hi = uv(82, LOT_V + 16);
     cam.setBounds(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y);
-    cam.setZoom((36 * DPR) / (HALF * 2)); // a tile ~36 css px wide
-    this.centerOn(NODES.M1.i, NODES.M1.j - 0.5);
+    cam.setZoom((34 * DPR) / (HALF * 2)); // a tile ~34 css px wide
+    this.centerOn(NODES.depot_b.i, NODES.depot_b.j);
 
     this.input.addPointer(1);
     this.input.on("pointerdown", () => { if (!this.input.pointer1.isDown || !this.input.pointer2.isDown) this.gestured = false; });
@@ -245,37 +250,38 @@ class Park extends Phaser.Scene {
   // ------------------------------------------------------------ static map
 
   drawStatic() {
-    const g = this.add.graphics().setDepth(-100);
-    // Lands as soft rounded regions.
-    for (const land of LANDS) {
-      const [u0, v0, u1, v1] = land.box;
-      const a = uv(u0, v0), b = uv(u1, v1);
-      g.fillStyle(land.ground, 1).fillRoundedRect(a.x, a.y, b.x - a.x, b.y - a.y, 120);
-    }
-    for (const land of LANDS) {
-      const [u0, v0, u1, v1] = land.box;
-      const a = uv(u0, v0), b = uv(u1, v1);
-      g.lineStyle(6, 0x000000, 0.12).strokeRoundedRect(a.x, a.y, b.x - a.x, b.y - a.y, 120);
-    }
-    const lake = uv(LAKE.u, LAKE.v);
-    g.fillStyle(0x2e86c1, 1).fillEllipse(lake.x, lake.y, LAKE.ru * 2 * HALF, LAKE.rv * 2 * (HALF / 2));
-    g.lineStyle(10, 0xd6eaf8, 0.6).strokeEllipse(lake.x, lake.y, LAKE.ru * 2 * HALF, LAKE.rv * 2 * (HALF / 2));
+    this.drawGround();
+    const pt = (id: string) => iso(NODES[id].i, NODES[id].j);
+    const circle = (gr: Phaser.GameObjects.Graphics, i: number, j: number, r: number, color: number, alpha = 1) =>
+      gr.fillStyle(color, alpha).fillEllipse(iso(i, j).x, iso(i, j).y, r * 2 * HALF * Math.SQRT2, r * HALF * Math.SQRT2);
 
-    // Paths, spurs to doors, junctions.
+    // Plazas: Fountain Circle, and an entrance plaza where each land meets the promenade.
+    const plaza = this.add.graphics().setDepth(-92);
+    const hub = NODES.hub;
+    circle(plaza, hub.i, hub.j, 5.2, 0x8d7b60);
+    circle(plaza, hub.i, hub.j, 4.8, 0xd9ccb4);
+    for (const id of RING_IDS) if (ZONES[id].kind === "land") circle(plaza, NODES[id].i, NODES[id].j, 2.6, 0xd9ccb4);
+
+    // Paths by mode: walkways, the footbridge, train rails.
     const paths = this.add.graphics().setDepth(-90);
-    const line = (ax: number, ay: number, bx: number, by: number, w: number) =>
-      paths.lineStyle(w, 0xd9ccb4, 1).lineBetween(ax, ay, bx, by);
-    for (const [a, b] of EDGES) {
-      const pa = iso(NODES[a].i, NODES[a].j), pb = iso(NODES[b].i, NODES[b].j);
-      line(pa.x, pa.y, pb.x, pb.y, 60);
+    const isBridge = (a2: string, b2: string) => BRIDGES.some(([x, y]) => (x === a2 && y === b2) || (x === b2 && y === a2));
+    for (const e of EDGES) {
+      const pa = pt(e.a), pb = pt(e.b);
+      if (e.mode === "train") {
+        paths.lineStyle(26, 0x6e4b2a, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
+        paths.lineStyle(6, 0xb3b6b7, 1).lineBetween(pa.x, pa.y - 7, pb.x, pb.y - 7).lineBetween(pa.x, pa.y + 7, pb.x, pb.y + 7);
+      } else if (e.mode === "foot") {
+        if (isBridge(e.a, e.b)) paths.lineStyle(80, 0x6e4b2a, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
+        paths.lineStyle(isBridge(e.a, e.b) ? 60 : 64, 0xd9ccb4, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
+      }
     }
     for (const l of LOCS) {
       const n = NODES[l.node], door = this.doorPoint(l);
       const pa = iso(n.i, n.j), pb = iso(door.i, door.j);
-      line(pa.x, pa.y, pb.x, pb.y, 30);
+      paths.lineStyle(30, 0xd9ccb4, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
     }
-    for (const [a, b] of SERVICE) {
-      const pa = iso(NODES[a].i, NODES[a].j), pb = iso(NODES[b].i, NODES[b].j);
+    for (const [a2, b2] of SERVICE) {
+      const pa = pt(a2), pb = pt(b2);
       const len = Phaser.Math.Distance.Between(pa.x, pa.y, pb.x, pb.y), n = Math.floor(len / 70);
       for (let k = 0; k < n; k += 2) {
         const t0 = k / n, t1 = (k + 1) / n;
@@ -284,11 +290,28 @@ class Park extends Phaser.Scene {
       }
     }
     for (const n of Object.values(NODES)) {
-      const p = iso(n.i, n.j);
-      paths.fillStyle(0xd9ccb4, 1).fillEllipse(p.x, p.y, 120, 60);
+      if (/^t\d+$/.test(n.id)) continue;
+      const q = iso(n.i, n.j);
+      paths.fillStyle(0xd9ccb4, 1).fillEllipse(q.x, q.y, 120, 60);
     }
 
-    for (const l of [...LOCS].sort((a, b) => a.i + a.j - (b.i + b.j))) {
+    this.drawTrees();
+
+    // Sky Buckets cable, strung high over the lagoon.
+    const sky = EDGES.find((e) => e.mode === "sky")!;
+    const sa = pt(sky.a), sb = pt(sky.b);
+    const cable = this.add.graphics().setDepth(4000);
+    cable.lineStyle(5, 0x2c3e50, 0.8).lineBetween(sa.x, sa.y - 170, sb.x, sb.y - 170);
+    for (const q of [sa, sb]) cable.fillStyle(0x7f8c8d, 1).fillRect(q.x - 8, q.y - 170, 16, 170);
+
+    // Coaster track loops and the Ferris wheel.
+    for (const l of LOCS) {
+      if (l.coaster) this.coasterTrack(l);
+      if (l.wheel) this.ferrisWheel(l);
+    }
+
+    // Buildings, decor, landmarks, labels.
+    for (const l of [...LOCS].sort((x, y) => x.i + x.j - (y.i + y.j))) {
       this.block(l);
       const top = iso(l.i, l.j, l.h);
       this.locLabels[l.id] = this.add.text(top.x, top.y - 16, l.name, {
@@ -296,12 +319,184 @@ class Park extends Phaser.Scene {
         stroke: "#000000", strokeThickness: 8, align: "center",
       }).setOrigin(0.5, 1).setDepth(6000);
     }
-    for (const land of LANDS) {
-      const p = uv(land.label[0], land.label[1]);
-      this.landLabels.push(this.add.text(p.x, p.y, land.name.toUpperCase(), {
-        fontFamily: "Trebuchet MS, Verdana, sans-serif", fontSize: "60px", color: "#ffffff",
-        stroke: "#00000088", strokeThickness: 10, fontStyle: "bold",
-      }).setOrigin(0.5, 0.5).setDepth(5900).setAlpha(0.9));
+    for (const d of DECOR) {
+      const ij = { i: (d.u + d.v) / 2, j: (d.v - d.u) / 2 };
+      this.block({ ...ij, w: d.w, d: d.d, h: d.h, color: d.color } as LocDef);
+      const top = iso(ij.i, ij.j, d.h);
+      if (d.icon) this.add.text(top.x, top.y + 6, d.icon, { fontSize: "64px" }).setOrigin(0.5, 1).setDepth(ij.i + ij.j + 0.5);
+      if (d.label) {
+        this.add.text(top.x, top.y - 50, d.label, {
+          fontFamily: "Trebuchet MS, Verdana, sans-serif", fontSize: "30px", color: "#dddddd", stroke: "#000", strokeThickness: 6,
+        }).setOrigin(0.5, 1).setDepth(5950);
+      }
+    }
+    for (const m of LANDMARKS) {
+      const ij = { i: (m.u + m.v) / 2, j: (m.v - m.u) / 2 };
+      this.block({ ...ij, w: 0.9, d: 0.9, h: m.h, color: m.color } as LocDef);
+      const top = iso(ij.i, ij.j, m.h);
+      this.add.text(top.x, top.y + 10, m.icon, { fontSize: "110px" }).setOrigin(0.5, 1).setDepth(ij.i + ij.j + 0.5);
+    }
+    for (const id of [...RING_IDS, "hub", "lot"] as ZoneId[]) {
+      const z = ZONES[id];
+      const q = id === "hub" ? { u: 0, v: HUB_V + 3.5 } : id === "lot" ? { u: 0, v: LOT_V + 7 } : ringPos(z.angle! + (z.kind === "land" ? z.span! * 0.22 : 0), z.kind === "land" ? 1.2 : 1.12);
+      const at = uv(q.u, q.v);
+      const big = z.kind === "land" || z.kind === "lot";
+      this.landLabels.push(this.add.text(at.x, at.y, big ? z.name.toUpperCase() : z.name, {
+        fontFamily: "Trebuchet MS, Verdana, sans-serif", fontSize: big ? "64px" : "48px", color: "#ffffff",
+        stroke: "#00000099", strokeThickness: 10, fontStyle: big ? "bold" : "bold italic",
+      }).setOrigin(0.5, 0.5).setDepth(5900).setAlpha(0.95));
+    }
+  }
+
+  /** Ground colour for a point, or null outside the park. Zone borders are noisy, blends fade between lands. */
+  groundAt(u: number, v: number): number | null {
+    const noise = (x: number, y: number) => 0.5 * Math.sin(x * 1.7 + Math.sin(y * 1.3)) + 0.5 * Math.sin(y * 2.1 + Math.sin(x * 0.9));
+    if (Math.abs(u) < 11 && v > DEPOT_V - 2 && v < GATE_V + 4) return ZONES.depot.ground;
+    if (Math.abs(u) < 26 + noise(u * 0.2, v * 0.2) && v >= GATE_V + 4 && v < LOT_V + 13) return ZONES.lot.ground;
+    const du = u - CENTER.u, dv = v - CENTER.v, r = Math.hypot(du, dv);
+    const deg = (Math.atan2(dv, du) * 180) / Math.PI;
+    const R = shapeR(deg), L = lagoonR(deg), n = noise(u * 0.12, v * 0.12);
+    if (r < 3.2 + n * 0.6) return 0xe5d3a1; // the island
+    if (r < L - 0.8) return Phaser.Display.Color.GetColor(40, 120 + Math.min(40, (L - r) * 4), 180 + Math.min(40, (L - r) * 3));
+    if (r < L + 0.9) return 0xe5d3a1; // beach
+    if (r > R * 2.0 + n * 3) return null;
+    const zone = ZONES[zoneAtAngle(deg + n * 7)];
+    const shade = (c: number, k: number) => {
+      const o = Phaser.Display.Color.IntegerToColor(c);
+      return Phaser.Display.Color.GetColor(Math.min(255, o.red * k), Math.min(255, o.green * k), Math.min(255, o.blue * k));
+    };
+    const k = 0.96 + 0.06 * noise(u * 0.9, v * 0.9);
+    if (zone.kind === "land") return shade(zone.ground, k);
+    // Blends fade from the previous land's colour to the next one's.
+    const off = (((deg + n * 7 - zone.angle! + 540) % 360) - 180) / zone.span! + 0.5;
+    const [pa, pb] = zone.parents!.map((x) => Phaser.Display.Color.IntegerToColor(ZONES[x].ground));
+    const t = Phaser.Math.Clamp(off, 0, 1);
+    const mixed = Phaser.Display.Color.GetColor(pa.red + (pb.red - pa.red) * t, pa.green + (pb.green - pa.green) * t, pa.blue + (pb.blue - pa.blue) * t);
+    const zc = Phaser.Display.Color.IntegerToColor(zone.ground), mc = Phaser.Display.Color.IntegerToColor(mixed);
+    return shade(Phaser.Display.Color.GetColor((mc.red + zc.red) / 2, (mc.green + zc.green) / 2, (mc.blue + zc.blue) / 2), k);
+  }
+
+  /** Paint the ground once, tile by tile, into a quarter-resolution texture. */
+  drawGround() {
+    const S = 0.25;
+    const lo = uv(-95, -45), hi = uv(95, LOT_V + 22);
+    const W = Math.ceil((hi.x - lo.x) * S), H = Math.ceil((hi.y - lo.y) * S);
+    const gg = this.make.graphics({}, false);
+    for (let i = Math.floor((-95 - 45) / 2); i <= Math.ceil((95 + LOT_V + 22) / 2); i++) {
+      for (let j = Math.floor((-45 - 95) / 2); j <= Math.ceil((LOT_V + 22 + 95) / 2); j++) {
+        const c = this.groundAt(i + 0.5 - (j + 0.5), i + 0.5 + j + 0.5);
+        if (c === null) continue;
+        const q = [iso(i, j), iso(i + 1, j), iso(i + 1, j + 1), iso(i, j + 1)].map((p2) => ({ x: (p2.x - lo.x) * S, y: (p2.y - lo.y) * S }));
+        gg.fillStyle(c, 1).beginPath().moveTo(q[0].x, q[0].y);
+        for (const p2 of q.slice(1)) gg.lineTo(p2.x, p2.y);
+        gg.closePath().fillPath();
+      }
+    }
+    const rt = this.add.renderTexture(lo.x, lo.y, W, H).setOrigin(0, 0).setScale(1 / S).setDepth(-100);
+    rt.draw(gg);
+    gg.destroy();
+  }
+
+  /** Trees fill every gap that isn't a path, a building or water, plus a berm around the edge. */
+  drawTrees() {
+    const segs: [number, number, number, number][] = [];
+    for (const e of EDGES) if (e.mode !== "sky") segs.push([NODES[e.a].i, NODES[e.a].j, NODES[e.b].i, NODES[e.b].j]);
+    for (const [a2, b2] of SERVICE) segs.push([NODES[a2].i, NODES[a2].j, NODES[b2].i, NODES[b2].j]);
+    for (const l of LOCS) { const d = this.doorPoint(l); segs.push([NODES[l.node].i, NODES[l.node].j, d.i, d.j]); }
+    const segDist = (i: number, j: number, [x1, y1, x2, y2]: [number, number, number, number]) => {
+      const dx = x2 - x1, dy = y2 - y1, L2 = dx * dx + dy * dy || 1;
+      const t = Phaser.Math.Clamp(((i - x1) * dx + (j - y1) * dy) / L2, 0, 1);
+      return Math.hypot(i - (x1 + dx * t), j - (y1 + dy * t));
+    };
+    const blocks = [...LOCS.map((l) => ({ i: l.i, j: l.j, r: Math.max(l.w, l.d) / 2 + (l.coaster ? 4.5 : 1.3) })),
+      ...DECOR.map((d) => ({ i: (d.u + d.v) / 2, j: (d.v - d.u) / 2, r: Math.max(d.w, d.d) / 2 + 0.8 })),
+      ...LANDMARKS.map((m) => ({ i: (m.u + m.v) / 2, j: (m.v - m.u) / 2, r: 1.2 }))];
+    const hash = (n: number) => { const x = Math.sin(n * 91.7) * 43758.5453; return x - Math.floor(x); };
+    const g = this.add.graphics().setDepth(-50);
+    let n = 0;
+    for (let u = -92; u <= 92; u += 2.4) {
+      for (let v = -42; v <= LOT_V + 18; v += 2.4) {
+        n++;
+        const uu = u + (hash(n) - 0.5) * 2.2, vv = v + (hash(n + 0.5) - 0.5) * 2.2;
+        const du = uu - CENTER.u, dv = vv - CENTER.v, r = Math.hypot(du, dv);
+        const deg = (Math.atan2(dv, du) * 180) / Math.PI;
+        const R = shapeR(deg);
+        if (r < lagoonR(deg) + 2) continue;
+        if (Math.abs(uu) < 13 && vv > DEPOT_V - 3 && vv < LOT_V + 14) continue;
+        const berm = r > R * 1.95 && r < R * 2.35;
+        if (r > R * 2.35) continue;
+        if (!berm && hash(n + 0.25) < 0.45) continue; // keep the park airy
+        const i = (uu + vv) / 2, j = (vv - uu) / 2;
+        if (segs.some((sg) => segDist(i, j, sg) < 1.5)) continue;
+        if (blocks.some((bk) => Math.hypot(i - bk.i, j - bk.j) < bk.r)) continue;
+        const zone = r > R * 1.95 ? null : zoneAtAngle(deg);
+        const style = zone && ["lagoon", "foam", "ozark", "y2k"].includes(zone) ? "palm"
+          : zone && ["bonewars", "ozark", "extinction"].includes(zone) ? "pine" : "round";
+        this.tree(g, iso(i, j), style, hash(n + 0.75));
+      }
+    }
+  }
+
+  tree(g: Phaser.GameObjects.Graphics, p: { x: number; y: number }, style: string, k: number) {
+    g.fillStyle(0x000000, 0.18).fillEllipse(p.x + 10, p.y, 70, 26);
+    if (style === "palm") {
+      g.lineStyle(9, 0x8b6b43, 1).lineBetween(p.x, p.y, p.x + 8, p.y - 95);
+      for (let a = 0; a < 5; a++) {
+        const t = (a / 5) * Math.PI * 2 + k;
+        g.fillStyle(0x2e8b57, 1).fillEllipse(p.x + 8 + Math.cos(t) * 28, p.y - 95 + Math.sin(t) * 10, 56, 18);
+      }
+      return;
+    }
+    if (style === "pine") {
+      g.fillStyle(0x5d4037, 1).fillRect(p.x - 5, p.y - 22, 10, 22);
+      g.fillStyle(0x1e5631, 1).fillTriangle(p.x - 34, p.y - 20, p.x + 34, p.y - 20, p.x, p.y - 110);
+      g.fillStyle(0x2d6a3e, 1).fillTriangle(p.x - 26, p.y - 55, p.x + 26, p.y - 55, p.x, p.y - 125);
+      return;
+    }
+    const r = 34 + k * 16;
+    g.fillStyle(0x5d4037, 1).fillRect(p.x - 5, p.y - 30, 10, 30);
+    g.fillStyle(k > 0.5 ? 0x2e7d32 : 0x388e3c, 1).fillCircle(p.x, p.y - 30 - r * 0.7, r);
+    g.fillStyle(0xffffff, 0.12).fillCircle(p.x - r * 0.3, p.y - 30 - r, r * 0.45);
+  }
+
+  /** A looping coaster track on supports, sprawling out behind the station. */
+  coasterTrack(l: LocDef) {
+    const out = { i: l.i - (CENTER.u + CENTER.v) / 2, j: l.j - (CENTER.v - CENTER.u) / 2 };
+    const len = Math.hypot(out.i, out.j) || 1;
+    const small = l.id === "raptor";
+    const cx = l.i + (out.i / len) * (small ? 2.5 : 4), cy = l.j + (out.j / len) * (small ? 2.5 : 4);
+    const rx = small ? 2.6 : 5, ry = small ? 1.8 : 3.2;
+    const ang = Math.atan2(out.j, out.i);
+    const g = this.add.graphics().setDepth(cx + cy + 1);
+    const pts: { x: number; y: number; gx: number; gy: number }[] = [];
+    for (let k = 0; k <= 64; k++) {
+      const t = (k / 64) * Math.PI * 2;
+      const a1 = rx * Math.cos(t) * (1 + 0.25 * Math.sin(3 * t)), b1 = ry * Math.sin(2 * t) * 0.9 + ry * 0.5 * Math.sin(t);
+      const i = cx + a1 * Math.cos(ang) - b1 * Math.sin(ang), j = cy + a1 * Math.sin(ang) + b1 * Math.cos(ang);
+      const z = (small ? 0.6 : 1) * (0.9 + 0.8 * Math.sin(2 * t + 1) + (k < 12 ? (k / 12) * 1.2 : 0));
+      const top = iso(i, j, Math.max(0.3, z)), ground = iso(i, j);
+      pts.push({ x: top.x, y: top.y, gx: ground.x, gy: ground.y });
+    }
+    const c = l.wet ? 0xd6eaf8 : Phaser.Display.Color.IntegerToColor(l.color).lighten(25).color;
+    pts.forEach((q, k) => { if (k % 4 === 0) g.lineStyle(5, 0x7f8c8d, 0.8).lineBetween(q.x, q.y, q.gx, q.gy); });
+    g.lineStyle(14, 0x2c3e50, 0.6).beginPath().moveTo(pts[0].x, pts[0].y);
+    for (const q of pts.slice(1)) g.lineTo(q.x, q.y);
+    g.strokePath();
+    g.lineStyle(8, c, 1).beginPath().moveTo(pts[0].x, pts[0].y);
+    for (const q of pts.slice(1)) g.lineTo(q.x, q.y);
+    g.strokePath();
+  }
+
+  ferrisWheel(l: LocDef) {
+    const base = iso(l.i, l.j, l.h), c = iso(l.i, l.j, l.h + 1.9);
+    const g = this.add.graphics().setDepth(l.i + l.j + 0.6);
+    const r = 150;
+    g.lineStyle(10, 0x7f8c8d, 1).lineBetween(base.x - 60, base.y, c.x, c.y).lineBetween(base.x + 60, base.y, c.x, c.y);
+    g.lineStyle(8, 0xf39c12, 1).strokeCircle(c.x, c.y, r);
+    for (let k = 0; k < 12; k++) {
+      const t = (k / 12) * Math.PI * 2;
+      g.lineStyle(3, 0xf5cba7, 1).lineBetween(c.x, c.y, c.x + Math.cos(t) * r, c.y + Math.sin(t) * r);
+      g.fillStyle([0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71][k % 4], 1).fillRoundedRect(c.x + Math.cos(t) * r - 14, c.y + Math.sin(t) * r, 28, 24, 5);
     }
   }
 
@@ -356,10 +551,10 @@ class Park extends Phaser.Scene {
 
   /** Background guests wander between junctions (visual only). */
   tickCrowd(dtGame: number) {
-    const ids = Object.keys(NODES);
+    const ids = Object.keys(NODES).filter((id) => !/^t\d+$/.test(id) && id !== "lot");
     for (const c of this.crowd) {
       if (!c.route.length) {
-        const r = shortest(c.prev, ids[Math.floor(Math.random() * ids.length)]);
+        const r = shortest(c.prev, ids[Math.floor(Math.random() * ids.length)], new Set(), false, new Set(["train", "sky"]));
         c.route = r ? r.path.slice(1) : [];
       }
       let left = 1.2 * dtGame;
@@ -441,6 +636,24 @@ class Park extends Phaser.Scene {
     if (this.sel?.kind === "node") {
       const n = NODES[this.sel.id], p = iso(n.i, n.j);
       g.lineStyle(8, 0xffd166, 1).strokeEllipse(p.x, p.y, 160, 80);
+    }
+
+    // The Prairie Line (cosmetic train) and the Sky Buckets gondolas.
+    const track = Object.values(NODES).filter((n) => /^t\d+$/.test(n.id)).sort((x, y) => +x.id.slice(1) - +y.id.slice(1));
+    for (let c = 0; c < 4; c++) {
+      const f = (((this.trainPhase - c * 0.012) % 1) + 1) % 1 * track.length;
+      const k0 = Math.floor(f), k1 = (k0 + 1) % track.length, t = f - k0;
+      const q = iso(track[k0].i + (track[k1].i - track[k0].i) * t, track[k0].j + (track[k1].j - track[k0].j) * t);
+      g.fillStyle(c === 0 ? 0x922b21 : 0x1e8449, 1).fillRoundedRect(q.x - 30, q.y - 40, 60, 34, 8);
+      g.lineStyle(3, 0x000000, 0.6).strokeRoundedRect(q.x - 30, q.y - 40, 60, 34, 8);
+    }
+    const skyE = EDGES.find((e) => e.mode === "sky")!;
+    const s0 = iso(NODES[skyE.a].i, NODES[skyE.a].j), s1 = iso(NODES[skyE.b].i, NODES[skyE.b].j);
+    for (let c = 0; c < 6; c++) {
+      const t = (this.skyPhase + c / 6) % 1, back = t > 0.5, tt = back ? 1 - (t - 0.5) * 2 : t * 2;
+      const x = s0.x + (s1.x - s0.x) * tt, y = s0.y + (s1.y - s0.y) * tt - 170 + (back ? -14 : 14);
+      g.lineStyle(3, 0x2c3e50, 0.8).lineBetween(x, y - 18, x, y);
+      g.fillStyle(back ? 0xe67e22 : 0xf1c40f, 1).fillRoundedRect(x - 16, y, 32, 26, 6);
     }
 
     // Background crowd, scaled with how busy the park is.
@@ -572,6 +785,7 @@ class Park extends Phaser.Scene {
     // Junctions; otherwise walk to the nearest one.
     let node = "", nd = Infinity;
     for (const n of Object.values(NODES)) {
+      if (/^t\d+$/.test(n.id)) continue;
       const p = iso(n.i, n.j);
       const d = Phaser.Math.Distance.Between(w.x, w.y, p.x, p.y);
       if (d < nd) { nd = d; node = n.id; }
@@ -628,7 +842,7 @@ class Park extends Phaser.Scene {
     let html = `<button class="x">✕</button>`;
     if (sel.kind === "loc") {
       const st = s.loc(sel.id), l = st.def;
-      const land = LANDS.find((x) => x.id === l.land)!;
+      const land = ZONES[l.zone];
       const bits: string[] = [];
       if (s.isClosed(l.id)) bits.push(`<span class="warn">Closed until ${fmtTime(st.closedUntil)} (${st.closedBy === "you" ? "your doing" : "genuinely broken"})</span>`);
       else bits.push("Open");
@@ -637,11 +851,11 @@ class Park extends Phaser.Scene {
       if (l.shows) bits.push(`${l.showName}: ${l.shows.map(fmtTime).join(", ")}${st.showCancelled ? " — next one CANCELLED" : ""}`);
       if (st.vegSwap) bits.push("Vegan patties: swapped 😈");
       if (st.readerUntil > s.time) bits.push(`Cash only until ${fmtTime(st.readerUntil)}`);
-      html += `<h2>${esc(l.name)}</h2><div class="status">${land.name} · ${bits.join(" · ")}</div>`;
+      html += `<h2>${esc(l.name)}</h2>${l.sub ? `<div class="status sub">${esc(l.sub)}</div>` : ""}<div class="status">${land.name} · ${bits.join(" · ")}</div>`;
       const notes: string[] = [];
       if (s.guestsAtLoc(l.id)) notes.push(`<span class="here">The Hendersons are right here.</span>`);
       if (s.isWitnessed(sel)) notes.push(`<span class="warn">They'd see you do it (+50% suspicion).</span>`);
-      if (s.hasAlibi(l.land)) notes.push(`<span class="ok">You have an alibi in ${land.name} (−40%).</span>`);
+      if (s.hasAlibi(l.zone)) notes.push(`<span class="ok">You have an alibi in ${land.name} (−40%).</span>`);
       if (s.duty?.loc === l.id) notes.push(`<span class="here">📋 Your duty is here.</span>`);
       if (s.bradSees(sel)) notes.push(`<span class="warn">👔 Brad can see this spot (+20 suspicion).</span>`);
       if (l.kind === "ride" && s.heat()) notes.push(`<span class="warn">☀️ Heat advisory: this line is cooking them.</span>`);
@@ -653,7 +867,7 @@ class Park extends Phaser.Scene {
       html += views.length ? this.actionButtons(views) : `<div class="status">Nothing to break here.</div>`;
     } else if (sel.kind === "node") {
       const n = NODES[sel.id];
-      const land = LANDS.find((x) => x.id === n.land)!;
+      const land = ZONES[n.zone];
       html += `<h2>Path junction</h2><div class="status">${land.name}${s.isBlocked(n.id) ? ` · <span class="warn">Wet Floor sign until ${fmtTime(s.blocked[n.id])}</span>` : ""}</div>`;
       if (!s.workerAt(n.id)) html += `<button class="walk" data-walk="1">🚶 Walk here (${Math.ceil(s.walkMinutes(n.id))} min)</button>`;
       const views = s.actionsFor(sel);
@@ -812,7 +1026,10 @@ class Park extends Phaser.Scene {
     const s = this.sim;
     if (this.running && !s.ended) {
       s.step((dtMs / 1000) * this.speed * GAME_MIN_PER_SEC);
-      this.tickCrowd((dtMs / 1000) * this.speed * GAME_MIN_PER_SEC);
+      const dtGame = (dtMs / 1000) * this.speed * GAME_MIN_PER_SEC;
+      this.tickCrowd(dtGame);
+      if (s.trainDownUntil <= s.time) this.trainPhase = (this.trainPhase + dtGame / 30) % 1;
+      if (s.skyDownUntil <= s.time) this.skyPhase = (this.skyPhase + dtGame / 24) % 1;
       this.checkTips();
       if (s.pauses.length) {
         const msg = s.pauses.splice(0).join(" · ");

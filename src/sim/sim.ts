@@ -6,24 +6,25 @@ import {
   ACTIONS, ActionDef, ActionId, COMBO, SPECIAL, TOOL, ToolId, TraitId, WishDef, dutyText, makeDay,
 } from "./content";
 import { AMBIENT, LINES } from "./lines";
-import { LOC, LOCS, LocDef, LandId, NODES, shortest } from "./park";
+import {
+  BOARD, EDGE_MODE, LOC, LOCS, LocDef, Mode, NODES, SPEED, ZONES, ZoneId, near, shortest, strength,
+} from "./park";
 
 export const OPEN = 10 * 60;
 export const CLOSE = 22 * 60;
 
 const STEP = 0.5;
-const GUEST_SPEED = 1.5; // tiles per game minute
-const WORKER_SPEED = 1.9;
+const GUEST_SPEED = 2.2; // tiles per game minute (the park is big now)
+const WORKER_SPEED = 2.8;
 const EARSHOT = 9; // tiles
 const WITNESS = 5;
 const REACH = 2.5; // how close you must be to talk to them
 const PATIENCE_HIT = 1.3;
 const REPEAT_WEIGHT = 0.7;
-const BRAD_SPEED = 1.4;
+const BRAD_SPEED = 2.0;
 const BRAD_SIGHT = 6;
 const HEAT = [13 * 60, 16 * 60];
 const HAUNT = 19 * 60;
-const OUTDOOR = ["rocket", "aero", "glitter", "leviathan", "raptor", "balloon"];
 
 // Where misery came from, for the results breakdown.
 const CATEGORY: Record<string, string> = {
@@ -36,7 +37,9 @@ const CATEGORY: Record<string, string> = {
   soaked: "Weather & water",
   parade: "General chaos", dj: "General chaos", detour: "General chaos", megaphone: "General chaos",
   survey: "General chaos", scanner: "General chaos",
-  complainBad: "Customer service",
+  complainBad: "Customer service", tram: "Customer service",
+  rigged: "Rigged games", unplug: "Rigged games", scaffold: "General chaos", smoke: "General chaos",
+  foam: "Weather & water", gas: "Stranded", stuck: "Stranded", scenic: "Endless lines",
 };
 
 export interface P { i: number; j: number }
@@ -47,7 +50,11 @@ export function fmtTime(min: number) {
   return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
 }
 
-interface Mover { pos: P; route: string[]; prev: string; staff?: boolean }
+interface Mover {
+  pos: P; route: string[]; prev: string; staff?: boolean;
+  riding?: Mode | null; // on the train / Sky Buckets (or waiting to board)
+  boardLeft?: number;
+}
 
 export interface LocState {
   def: LocDef;
@@ -65,16 +72,20 @@ export interface LocState {
   lockerUntil: number;
   fansUntil: number;
   monstersUntil: number;
+  riggedUntil: number;
+  scenicUntil: number;
+  tramDown: boolean;
 }
 
 export interface Fx { type: "misery" | "combo" | "caught"; text: string }
 
 const MONEY = ["reader", "upcharge", "locker"];
-const RUINS = ["complainBad", "closed", "closedFront", "show", "timeshare", "veg", "reader", "lateShow", "fryer", "app", "jam"];
+const RUINS = ["rigged", "unplug", "scaffold", "gas", "stuck", "tram", "monsters", "complainBad", "closed", "closedFront", "show", "timeshare", "veg", "reader", "lateShow", "fryer", "app", "jam"];
 
 export interface Wish { def: WishDef; done: boolean; failed: boolean; revealed: boolean; fails: number; retryAt: number }
 
 type Purpose = "wish" | "ride" | "food" | "restroom" | "show" | "shop" | "exit" | "gate" | "complain";
+const PLAYABLE = ["ride", "game", "photo"];
 interface Goal { loc: string; purpose: Purpose; wish?: Wish }
 
 type Act =
@@ -117,7 +128,12 @@ export class Sim {
   duty: Duty | null = null;
   dutiesDone = 0;
   dutiesMissed = 0;
-  alibi: { land: LandId; until: number } | null = null;
+  alibi: { zone: ZoneId; until: number } | null = null;
+  smokeUntil = 0;
+  foamUntil = 0;
+  trainDownUntil = 0;
+  skyDownUntil = 0;
+  private smokeHit = false;
   thought = "";
   thoughtUntil = 0;
   log: LogEntry[] = [];
@@ -167,6 +183,7 @@ export class Sim {
         def, closedUntil: 0, closedBy: null, slowUntil: 0, vegSwap: false, readerUntil: 0,
         showCancelled: false, scannerBroken: false, readyAt: {}, timeshare: false,
         oldOwnerUntil: 0, upchargeUntil: 0, lockerUntil: 0, fansUntil: 0, monstersUntil: 0,
+        riggedUntil: 0, scenicUntil: 0, tramDown: false,
       };
     }
     const day = makeDay(this.rng);
@@ -174,12 +191,12 @@ export class Sim {
     this.wishes = day.wishes.map((def) => ({ def, done: false, failed: false, revealed: false, fails: 0, retryAt: 0 }));
     for (const w of this.shuffle([...this.wishes]).slice(0, 2)) w.revealed = true;
     this.breakdowns = [this.between(11 * 60, 14 * 60), this.between(14 * 60, 17 * 60), this.between(17 * 60, 20 * 60)];
-    const gate = NODES.G;
-    this.g = { pos: { i: gate.i + 2, j: gate.j + 2 }, route: ["G"], prev: "G", act: { t: "walk", goal: { loc: "gate", purpose: "gate" } } };
-    this.w = { pos: { i: NODES.M1.i, j: NODES.M1.j }, route: [], prev: "M1", staff: true, task: null, pending: null, follow: false };
-    this.brad = { pos: { i: NODES.H.i, j: NODES.H.j }, route: [], prev: "H", staff: true, pause: 20 };
+    const lot = NODES.lot;
+    this.g = { pos: { i: lot.i, j: lot.j }, route: ["gate"], prev: "lot", act: { t: "walk", goal: { loc: "gate", purpose: "gate" } } };
+    this.w = { pos: { i: NODES.depot_b.i, j: NODES.depot_b.j }, route: [], prev: "depot_b", staff: true, task: null, pending: null, follow: false };
+    this.brad = { pos: { i: NODES.hub.i, j: NODES.hub.j }, route: [], prev: "hub", staff: true, pause: 20 };
     this.rainAt = this.between(13.5 * 60, 18.5 * 60);
-    this.note("The Hendersons are pulling up to the Front Gate. Those ticket scanners look… fragile.", "park");
+    this.note("The Hendersons just parked in Lot Z. Those Front Gate ticket scanners look\u2026 fragile.", "park");
   }
 
   // ------------------------------------------------------------- loadout
@@ -204,12 +221,29 @@ export class Sim {
     const base = def.baseWait ?? 10;
     const h = this.time / 60;
     const crowd = 0.6 + 0.6 * Math.exp(-((h - 15) ** 2) / 8);
-    const app = def.land === "future" && this.appDownUntil > this.time ? 2 : 1;
+    const app = this.appDownUntil > this.time ? 1 + strength("aero", def.zone) : 1;
     return Math.round(base * crowd * (this.isSlow(id) ? 2 : 1) * app);
   }
 
   workerSpeed() { return WORKER_SPEED * (this.has("cart") ? 1.8 : 1); }
-  heard() { return this.has("radio") || dist(this.w.pos, this.g.pos) <= EARSHOT; }
+  heard() {
+    if (this.has("radio")) return true;
+    if (this.inSmoke(this.guestZone()) || this.inSmoke(NODES[this.w.prev].zone)) return false; // can't hear a thing
+    return dist(this.w.pos, this.g.pos) <= EARSHOT;
+  }
+  /** Meteor smoke fills Extinction Junction and spills into its neighbours. */
+  inSmoke(zone: ZoneId) { return this.smokeUntil > this.time && near("extinction", zone) > 0; }
+  /** On a moving train / gondola (not just waiting to board)? */
+  aboard(m: Mover, mode?: Mode) {
+    return !!m.riding && (!mode || m.riding === mode) && (m.boardLeft ?? 0) <= 0 && m.route.length > 0;
+  }
+  private downModes() {
+    const s = new Set<Mode>();
+    if (this.trainDownUntil > this.time) s.add("train");
+    if (this.skyDownUntil > this.time) s.add("sky");
+    return s;
+  }
+  private speedOf(m: Mover) { return m === this.w ? this.workerSpeed() : m === this.brad ? BRAD_SPEED : GUEST_SPEED; }
   nearGuests(r = REACH) { return this.g.act.t !== "gone" && dist(this.w.pos, this.g.pos) <= r; }
   workerAt(node: string) { return !this.w.route.length && dist(this.w.pos, NODES[node]) < 0.05; }
   guestsAtLoc(id: string) {
@@ -221,7 +255,9 @@ export class Sim {
   activity(): string {
     const a = this.g.act;
     if (a.t === "gone") return "Gone home";
-    if (a.t === "walk") return this.heard() ? `Walking to ${LOC[a.goal.loc].name}` : "Walking somewhere… (too far to hear)";
+    if (a.t === "walk" && this.aboard(this.g, "train")) return "Riding the Prairie Line";
+    if (a.t === "walk" && this.aboard(this.g, "sky")) return "Riding the Sky Buckets";
+    if (a.t === "walk") return this.heard() ? `Walking to ${LOC[a.goal.loc].name}` : "Walking somewhere\u2026 (too far to hear)";
     if (a.t === "queue") return `In line for ${LOC[a.loc].name} (${Math.ceil(a.left)} min left)`;
     return a.what;
   }
@@ -236,7 +272,7 @@ export class Sim {
 
   /** Minutes for the worker to walk to a node. */
   walkMinutes(node: string) {
-    return this.routeCost(this.w, node, new Set()) / this.workerSpeed();
+    return this.routeCost(this.w, node, new Set());
   }
 
   // ------------------------------------------------------------- movement
@@ -245,17 +281,21 @@ export class Sim {
     return this.plan(m, target, blocked)?.cost ?? Infinity;
   }
 
+  /** Cheapest route (in minutes) from wherever the mover is, possibly mid-edge. */
   private plan(m: Mover, target: string, blocked: Set<string>) {
     const a = m.prev, b = m.route[0];
+    const sp = this.speedOf(m), down = this.downModes();
+    const midMode = b ? EDGE_MODE[a + "|" + b] ?? "foot" : "foot";
+    const legSpeed = midMode === "foot" ? sp : SPEED[midMode];
     const opts: { cost: number; route: string[] }[] = [];
-    const ra = shortest(a, target, blocked, !!m.staff);
+    const ra = midMode === "foot" ? shortest(a, target, blocked, !!m.staff, down, sp) : null; // no hopping off a moving train
     if (ra) {
       const d = dist(m.pos, NODES[a]);
-      opts.push({ cost: d + ra.len, route: d < 0.05 ? ra.path.slice(1) : ra.path });
+      opts.push({ cost: d / sp + ra.minutes, route: d < 0.05 ? ra.path.slice(1) : ra.path });
     }
     if (b && b !== a) {
-      const rb = shortest(b, target, blocked, !!m.staff);
-      if (rb) opts.push({ cost: dist(m.pos, NODES[b]) + rb.len, route: rb.path });
+      const rb = shortest(b, target, blocked, !!m.staff, down, sp);
+      if (rb) opts.push({ cost: dist(m.pos, NODES[b]) / legSpeed + rb.minutes, route: rb.path });
     }
     if (!opts.length) return null;
     return opts.sort((x, y) => x.cost - y.cost)[0];
@@ -266,21 +306,41 @@ export class Sim {
     m.route = p ? p.route : [];
   }
 
-  /** Advance a mover; returns true when it has arrived (route empty). */
+  /**
+   * Advance a mover by dt minutes; returns true when it has arrived (route
+   * empty). Walks at `speed`; trains and gondolas go at their own speed after
+   * a boarding wait, and stop dead if they've been stopped.
+   */
   private move(m: Mover, speed: number, dt: number) {
-    let left = speed * dt;
-    while (left > 0 && m.route.length) {
-      const n = NODES[m.route[0]];
+    let t = dt;
+    while (t > 0 && m.route.length) {
+      const next = m.route[0];
+      const mode = EDGE_MODE[m.prev + "|" + next] ?? "foot";
+      if (mode === "foot") m.riding = null;
+      else {
+        if (this.downModes().has(mode)) return false;
+        if (m.riding !== mode) { m.riding = mode; m.boardLeft = BOARD[mode]; }
+        if ((m.boardLeft ?? 0) > 0) {
+          const w = Math.min(t, m.boardLeft!);
+          m.boardLeft! -= w;
+          t -= w;
+          continue;
+        }
+      }
+      const sp = mode === "foot" ? speed : SPEED[mode];
+      const n = NODES[next];
       const d = dist(m.pos, n);
-      if (d <= left) {
+      if (d <= sp * t) {
         m.pos = { i: n.i, j: n.j };
         m.prev = m.route.shift()!;
-        left -= d;
+        t -= d / sp;
       } else {
-        m.pos = { i: m.pos.i + ((n.i - m.pos.i) / d) * left, j: m.pos.j + ((n.j - m.pos.j) / d) * left };
-        left = 0;
+        const k = (sp * t) / d;
+        m.pos = { i: m.pos.i + (n.i - m.pos.i) * k, j: m.pos.j + (n.j - m.pos.j) * k };
+        t = 0;
       }
     }
+    if (!m.route.length) m.riding = null;
     return !m.route.length;
   }
 
@@ -348,6 +408,8 @@ export class Sim {
   /** Can Brad see where this would happen? */
   bradSees(t: Target) {
     const where = t.kind === "guests" ? this.w.pos : NODES[this.targetNode(t)!];
+    const zone = t.kind === "guests" ? NODES[this.w.prev].zone : NODES[this.targetNode(t)!].zone;
+    if (this.inSmoke(zone) || this.inSmoke(NODES[this.brad.prev].zone)) return false; // the smoke is your friend
     return dist(this.brad.pos, where) <= BRAD_SIGHT;
   }
 
@@ -374,13 +436,15 @@ export class Sim {
     if (reason === "timeshare") out.push("branson");
     if (MONEY.includes(reason) && this.hits.some((h) => MONEY.includes(h.reason) && h.reason !== reason)) out.push("nickel");
     if (reason === "complainBad") out.push("stonewall");
+    if (reason === "soaked" && this.djUntil > t && strength("mirrorball", this.guestZone()) > 0) out.push("wetwild");
+    if (reason === "stuck" || reason === "gas" || reason === "jam") out.push("stranded");
     return out;
   }
 
-  guestLand() {
+  guestZone(): ZoneId {
     const a = this.g.act;
-    if ((a.t === "queue" || a.t === "busy") && a.loc) return LOC[a.loc].land;
-    return NODES[this.g.prev].land;
+    if ((a.t === "queue" || a.t === "busy") && a.loc) return LOC[a.loc].zone;
+    return NODES[this.g.prev].zone;
   }
 
   /** Little status icons for the group. */
@@ -388,7 +452,9 @@ export class Sim {
     const out: string[] = [];
     if (this.soakedUntil > this.time) out.push("💦")
     if (this.queasyUntil > this.time) out.push("🤢");
-    if (this.djUntil > this.time && this.guestLand() === "rave") out.push("🎵");
+    if (this.djUntil > this.time && strength("mirrorball", this.guestZone()) > 0) out.push("🎵");
+    if (this.inSmoke(this.guestZone())) out.push("🌫️");
+    if (this.aboard(this.g)) out.push(this.g.riding === "train" ? "🚂" : "🚡");
     return out;
   }
 
@@ -432,6 +498,8 @@ export class Sim {
       if (this.duty?.loc === target.id) defs.push(SPECIAL.duty);
       for (const a of ACTIONS) {
         if (a.locs ? !a.locs.includes(target.id) : !a.kinds?.includes(kind)) continue;
+        if (a.id === "stoptrain" && this.locs[target.id].def.mode !== "train") continue;
+        if (a.id === "stopsky" && this.locs[target.id].def.mode !== "sky") continue;
         if (a.tool && !(a.tool in this.tools)) continue;
         if (a.withoutTool && a.withoutTool in this.tools) continue;
         defs.push(a);
@@ -518,6 +586,16 @@ export class Sim {
       case "timeshare":
         if (l.timeshare) return "Already booked";
         return (l.def.shows ?? []).some((x) => x > this.time) ? null : "No more shows today";
+      case "rig": return l.riggedUntil > this.time ? "Already rigged" : null;
+      case "scenic": return l.scenicUntil > this.time ? "Already scenic" : null;
+      case "smoke": return this.smokeUntil > this.time ? "Already smoky" : null;
+      case "foam": return this.foamUntil > this.time ? "Already foaming" : null;
+      case "unplug": case "scaffold": case "gas": return this.isClosed(t.id) ? "Already closed" : null;
+      case "stoptrain": return this.trainDownUntil > this.time ? "Already stopped" : null;
+      case "stopsky": return this.skyDownUntil > this.time ? "Already stopped" : null;
+      case "tram":
+        if (this.time < 19 * 60 + 30) return "Only near closing";
+        return l.tramDown ? "Already \u201cout of service\u201d" : null;
     }
     return null;
   }
@@ -529,8 +607,8 @@ export class Sim {
     const where = t.kind === "guests" ? null : this.targetNode(t);
     const seen = where ? dist(this.g.pos, NODES[where]) <= WITNESS : false;
     if (seen && !this.has("mascot")) c *= 1.5;
-    const land = t.kind === "loc" ? this.locs[t.id].def.land : t.kind === "node" ? NODES[t.id].land : null;
-    if (land && this.alibi && this.alibi.land === land && this.alibi.until > this.time) c *= 0.6;
+    const zone = t.kind === "loc" ? this.locs[t.id].def.zone : t.kind === "node" ? NODES[t.id].zone : null;
+    if (zone && this.hasAlibi(zone)) c *= 0.6;
     if (this.suspicion >= 75) c *= 1.5;
     return Math.round(c + 3 * this.recent(this.sabLog)) + (this.bradSees(t) ? 20 : 0);
   }
@@ -540,7 +618,7 @@ export class Sim {
     return !!where && !this.has("mascot") && dist(this.g.pos, NODES[where]) <= WITNESS;
   }
 
-  hasAlibi(land: LandId) { return !!this.alibi && this.alibi.land === land && this.alibi.until > this.time; }
+  hasAlibi(zone: ZoneId) { return !!this.alibi && this.alibi.until > this.time && near(this.alibi.zone, zone) > 0; }
 
   /** Do an action; walks there first if needed. Returns false if it can't. */
   doAction(t: Target, def: ActionDef) {
@@ -626,7 +704,7 @@ export class Sim {
         this.dutiesDone++;
         this.duty = null;
         this.suspicion = Math.max(0, this.suspicion - 6);
-        this.alibi = { land: l.def.land, until: this.time + 60 };
+        this.alibi = { zone: l.def.zone, until: this.time + 60 };
         this.nextDutyAt = this.time + this.between(90, 130);
         if (this.bradSees(t)) {
           this.suspicion = Math.max(0, this.suspicion - 4);
@@ -717,7 +795,7 @@ export class Sim {
         this.appDownUntil = until;
         this.note("The FunPass app is down. \u201cWe're aware of the issue.\u201d", "you");
         const g = this.g.act;
-        if (g.t === "queue" && LOC[g.loc].land === "future") {
+        if (g.t === "queue" && strength("aero", LOC[g.loc].zone) > 0) {
           const progress = 1 - g.left / g.total;
           this.hurt((5 + 25 * progress) * (g.wish?.def.weight ?? REPEAT_WEIGHT), 4 + 12 * progress, "app", true, g.wish);
           g.total = this.currentWait(g.loc);
@@ -734,6 +812,82 @@ export class Sim {
       case "splash":
         this.splashUntil = until;
         this.note("Splash zone set to \u201cmonsoon.\u201d", "you");
+        return;
+      case "rig":
+        l.riggedUntil = until;
+        this.note("Ring Toss pegs swapped for the slightly-too-wide ones.", "you");
+        return;
+      case "scenic": {
+        l.scenicUntil = until;
+        this.note("Bone Wars Mine Train switched to Scenic Mode. Very scenic. Very slow.", "you");
+        const g = this.g.act;
+        if (g.t === "busy" && g.loc === "minetrain") {
+          g.left += 20;
+          this.hurt(8, 5, "scenic", true, this.wish("minetrain"));
+          this.say(this.line("scenic"), "bad", true);
+        }
+        return;
+      }
+      case "smoke":
+        this.smokeUntil = until;
+        this.smokeHit = false;
+        this.note("Meteor smoke vents: OPEN. You can't see Brad. Brad can't see you. Nobody can hear anything.", "you");
+        return;
+      case "unplug": {
+        const g = this.g.act;
+        if (g.t === "busy" && g.loc === "arcade") {
+          g.done = undefined;
+          g.left = 0;
+          const w = this.wish("game");
+          this.hurt(16 * (w?.def.weight ?? REPEAT_WEIGHT), 8, "unplug", true, w);
+          if (w) w.failed = true;
+          this.say(this.line("unplug"), "bad", true);
+        }
+        this.note("Arcade Galaxy: \u201cpower surge.\u201d", "you");
+        this.closeLoc("arcade", this.time + 60, "you");
+        return;
+      }
+      case "scaffold":
+        this.note("Scaffolding erected in front of The Bubble Wall. No one will ever take it down.", "you");
+        this.closeLoc(t.id, this.time + 120, "you");
+        return;
+      case "foam":
+        this.foamUntil = until;
+        this.note("Foam cannons set to 11. The pier is now 40% foam by volume.", "you");
+        if (this.guestZone() === "foam") this.soak();
+        return;
+      case "gas": {
+        const g = this.g.act;
+        if (g.t === "busy" && g.loc === "cruise") {
+          g.left += 20;
+          g.what = "Stranded mid-lagoon on the Party Cove Cruise";
+          this.hurt(16, 8, "gas", true, this.wish("cruise"));
+          this.say(this.line("gas"), "bad", true);
+        } else {
+          this.note("The Party Cove Cruise is \u201cout of gas.\u201d", "you");
+          this.closeLoc("cruise", this.time + 45, "you");
+        }
+        return;
+      }
+      case "stoptrain":
+        this.trainDownUntil = this.time + 30;
+        this.note("The Prairie Line is stopped for a \u201csignal issue.\u201d", "you");
+        if (this.aboard(this.g, "train")) {
+          this.hurt(16, 8, "stuck");
+          this.say(this.line("stuckTrain"), "bad", true);
+        }
+        return;
+      case "stopsky":
+        this.skyDownUntil = this.time + 20;
+        this.note("Sky Buckets stopped. Gondolas swaying gently over the lagoon.", "you");
+        if (this.aboard(this.g, "sky")) {
+          this.hurt(18, 10, "stuck");
+          this.say(this.line("stuckSky"), "bad", true);
+        }
+        return;
+      case "tram":
+        l.tramDown = true;
+        this.note("Parking tram: OUT OF SERVICE. Lot Z is 1.4 miles away.", "you");
         return;
     }
   }
@@ -814,7 +968,7 @@ export class Sim {
     if (this.open(merch) && t >= 20 * 60 + 45) return this.announce(merch, "shop");
     const show = this.wish("show");
     if (this.open(show)) {
-      const travel = this.pathLen(show.def.loc) / GUEST_SPEED;
+      const travel = this.pathLen(show.def.loc); // minutes
       const st = show.def.showTime!;
       if (t < st && t >= st - travel - 20) return this.announce(show, "show");
     }
@@ -832,10 +986,10 @@ export class Sim {
       const f = this.nearest("food");
       if (f) return this.goTo({ loc: f.id, purpose: "food" });
     }
-    const rides = this.wishes.filter((w) => LOC[w.def.loc].kind === "ride" && this.open(w) && w.retryAt <= t
+    const rides = this.wishes.filter((w) => PLAYABLE.includes(LOC[w.def.loc].kind) && this.open(w) && w.retryAt <= t
       && (w.def.id !== "haunt" || t >= HAUNT));
     if (rides.length) {
-      const best = rides.map((w) => ({ w, s: w.def.weight * 30 - this.pathLen(w.def.loc) }))
+      const best = rides.map((w) => ({ w, s: w.def.weight * 30 - this.pathLen(w.def.loc) * 1.5 }))
         .sort((a, b) => b.s - a.s)[0].w;
       return this.announce(best, "wish");
     }
@@ -885,10 +1039,24 @@ export class Sim {
         this.g.act = { t: "busy", loc: "relations", left: 10, what: "Talking to Guest Relations" };
         return;
       case "exit":
+        if (l.tramDown) {
+          this.hurt(14, 0, "tram");
+          this.say(this.line("tram"), "bad", true);
+        }
         this.g.act = { t: "gone" };
         this.end(this.time >= CLOSE - 25 ? "closed" : "left");
         return;
       case "wish": case "ride": {
+        if (l.def.kind === "game" || l.def.kind === "photo") {
+          if (this.isClosed(l.def.id)) {
+            this.hurt(10 * (w?.def.weight ?? REPEAT_WEIGHT), 8, l.def.kind === "photo" ? "scaffold" : "closed", yours, w);
+            this.say(this.line(l.def.kind === "photo" ? "scaffold" : "closedArrive", {}, w?.def.who), "bad", true);
+            if (w) this.failWish(w);
+            return this.decide();
+          }
+          this.g.act = { t: "queue", loc: l.def.id, total: 5, left: 5, wish: w };
+          return;
+        }
         if (this.isClosed(l.def.id)) {
           this.hurt(12 * (w?.def.weight ?? REPEAT_WEIGHT), 10, "closed", yours, w);
           this.say(this.line("closedArrive", {}, w?.def.who), "bad", true);
@@ -1015,12 +1183,37 @@ export class Sim {
       };
       return;
     }
+    if (def.kind === "game" || def.kind === "photo") {
+      const game = def.kind === "game";
+      this.g.act = {
+        t: "busy", loc: a.loc, left: game ? 10 : 3, what: game ? `Playing at ${def.name}` : `Posing at ${def.name}`,
+        done: () => {
+          const w = a.wish;
+          if (game && this.locs[a.loc].riggedUntil > this.time) {
+            this.hurt(12 * (w?.def.weight ?? REPEAT_WEIGHT), 6, "rigged", true, w);
+            this.say(this.line("rigged"), "bad", true);
+            if (w) w.failed = true;
+            return;
+          }
+          if (w) { w.done = true; this.joy(4, 6); }
+          this.say(this.line(game ? "gameWin" : "photoOk", {}, w?.def.who), "good");
+        },
+      };
+      return;
+    }
+    const scenic = a.loc === "minetrain" && this.locs.minetrain.scenicUntil > this.time;
+    if (scenic) {
+      this.hurt(8, 5, "scenic", true, a.wish);
+      this.say(this.line("scenic"), "bad", true);
+    }
     this.g.act = {
-      t: "busy", loc: a.loc, left: def.rideMin ?? 5, what: `Riding ${def.name}`,
+      t: "busy", loc: a.loc, left: (def.rideMin ?? 5) + (scenic ? 20 : 0),
+      what: scenic ? "On the mine train, in Scenic Mode. So scenic." : `Riding ${def.name}`,
       done: () => {
         this.lastRide = a.loc;
-        if (def.wet && this.splashUntil > this.time) this.soak();
-        if (def.land === "world" && this.spinUntil > this.time && this.queasyUntil <= this.time) {
+        if (def.wet && (this.splashUntil > this.time || (this.foamUntil > this.time && def.zone === "foam"))) this.soak();
+        const sp = strength("passport", def.zone);
+        if (sp > 0 && this.spinUntil > this.time && this.queasyUntil <= this.time && (sp >= 1 || this.rng() < 0.5)) {
           this.queasyUntil = this.time + 60;
           this.hurt(6, 4, "queasy");
           this.say(this.line("queasy"), "bad", true);
@@ -1074,9 +1267,18 @@ export class Sim {
     if (this.g.act.t !== "gone" && this.time >= OPEN) {
       if (this.soakedUntil > this.time) { this.addMisery(0.06 * dt, "soaked"); this.patience -= 0.03 * dt; }
       if (this.queasyUntil > this.time) this.addMisery(0.05 * dt, "queasy");
-      if (this.djUntil > this.time && this.guestLand() === "rave") {
-        this.addMisery(0.25 * dt, "dj");
-        this.patience -= 0.06 * dt;
+      const djs = strength("mirrorball", this.guestZone());
+      if (this.foamUntil > this.time && this.guestZone() === "foam") {
+        this.soak();
+        this.addMisery(0.12 * dt, "foam");
+      }
+      if (this.inSmoke(this.guestZone()) && this.g.act.t === "walk") {
+        this.addMisery(0.05 * dt, "smoke");
+        if (!this.smokeHit) { this.smokeHit = true; this.say(this.line("smoke"), "bad", true); }
+      }
+      if (this.djUntil > this.time && djs > 0) {
+        this.addMisery(0.25 * djs * dt, "dj");
+        this.patience -= 0.06 * djs * dt;
         if (!this.djHit) {
           this.djHit = true;
           this.hits.push({ time: this.time, reason: "dj" });
@@ -1116,7 +1318,13 @@ export class Sim {
       this.rainUntil = this.time + 35;
       this.banner("\ud83c\udf27\ufe0f Surprise storm! Outdoor coasters closed for lightning. Not your fault. (Cover!)");
       this.suspicion = Math.max(0, this.suspicion - 6);
-      for (const id of OUTDOOR) if (!this.isClosed(id)) this.closeLoc(id, this.rainUntil, "park");
+      for (const l of LOCS) if (l.outdoor && !this.isClosed(l.id)) this.closeLoc(l.id, this.rainUntil, "park");
+      // Lightning also stops the Sky Buckets, with whoever's aboard.
+      this.skyDownUntil = Math.max(this.skyDownUntil, this.rainUntil);
+      if (this.aboard(this.g, "sky")) {
+        this.hurt(10, 6, "stuck", false);
+        this.say(this.line("stuckSky"), "bad", true);
+      }
       if (this.g.act.t === "walk") this.soak(false);
     }
     if (!this.hauntOpen && this.time >= HAUNT) {
@@ -1132,8 +1340,9 @@ export class Sim {
       let target: string;
       if (this.suspicion >= 75) target = this.w.route[0] ?? this.w.prev;
       else {
-        const land = this.suspicion >= 50 ? NODES[this.w.prev].land : null;
-        const ids = Object.values(NODES).filter((n) => !land || n.land === land).map((n) => n.id);
+        const zone = this.suspicion >= 50 ? NODES[this.w.prev].zone : null;
+        const ids = Object.values(NODES)
+          .filter((n) => !/^t\d+$/.test(n.id) && n.id !== "lot" && (!zone || near(zone, n.zone) > 0)).map((n) => n.id);
         target = ids[Math.floor(this.rng() * ids.length)];
       }
       b.pause = this.suspicion >= 75 ? 0.5 : this.between(4, 10);
@@ -1157,7 +1366,7 @@ export class Sim {
       this.nextDutyAt = this.time + this.between(90, 130);
     }
     if (!this.duty && this.time >= this.nextDutyAt && this.time < CLOSE - 90) {
-      const opts = LOCS.filter((l) => l.kind !== "gate");
+      const opts = LOCS.filter((l) => l.kind !== "gate" && l.kind !== "station");
       const l = opts[Math.floor(this.rng() * opts.length)];
       const deadline = this.time + 75;
       this.duty = { loc: l.id, deadline, text: dutyText(this.rng, l.name, fmtTime(deadline)) };
@@ -1177,7 +1386,7 @@ export class Sim {
           this.say(this.line("detour"), "bad", true);
         }
         this.patience -= 0.015 * dt;
-        const main = (n?: string) => n === "M1" || n === "M2";
+        const main = (n?: string) => n === "depot" || n === "depot_b";
         if (this.paradeUntil > this.time && (main(g.route[0]) || (main(g.prev) && g.route.length))) {
           if (!this.paradeHit) {
             this.paradeHit = true;
@@ -1187,8 +1396,12 @@ export class Sim {
           break;
         }
         const before = g.prev;
-        const arrived = this.move(g, GUEST_SPEED, dt);
-        if (g.prev !== before && NODES[g.prev].land === "ocean" && this.splashUntil > this.time) this.soak();
+        const arrived = this.move(g, GUEST_SPEED * (this.inSmoke(NODES[g.prev].zone) ? 0.6 : 1), dt);
+        if (g.prev !== before && !this.aboard(g)) {
+          const s = strength("lagoon", NODES[g.prev].zone);
+          if (this.splashUntil > this.time && s > 0 && (s >= 1 || this.rng() < 0.5)) this.soak();
+          if (this.foamUntil > this.time && NODES[g.prev].zone === "foam") this.soak();
+        }
         if (arrived) this.arrive(a.goal);
         break;
       }
@@ -1276,7 +1489,7 @@ export class Sim {
     add("jam", "Stuck on T-Rex Trek for 25 minutes while it roared at us. My kids are in therapy. We don't have kids.");
     add("timeshare", "The \u201cshow\u201d was a timeshare pitch. We own part of a condo in Branson now.");
     add("app", "Their app erased us from a line we were physically standing in.");
-    add("dj", "The Rave area played ONE song. For an hour. I can still hear it.");
+    add("dj", "The disco area played ONE song. For an hour. I can still hear it.");
     add("fans", "The queue fans were unplugged. During a HEAT ADVISORY.");
     add("monsters", "The Haunt had no monsters. Just a guy eating a pretzel.");
     add("megaphone", "Staff kept announcing rides were closed. They weren't. Or were they?");
@@ -1284,6 +1497,14 @@ export class Sim {
     add("locker", "The locker charged by the minute because THEIR line was slow.");
     add("complainBad", "Guest Relations said it was the old company's policy. Which old company?!");
     add("soaked", "Got soaked walking PAST the lagoon. Walking. Past it.");
+    add("rigged", "The ring toss is rigged. I have a physics degree. It is RIGGED.");
+    add("unplug", "Arcade 'power surge' right before my high score. Sure.");
+    add("scaffold", "Drove four hours for one photo at the Bubble Wall. It was under scaffolding.");
+    add("smoke", "Some 'meteor' smoke show. Couldn't see my own hands for half an hour.");
+    add("gas", "The party boat ran out of gas in the middle of a man-made lake.");
+    add("stuck", "Got stuck on their train/gondola. A guy sold us water through the window.");
+    add("tram", "The parking tram was 'out of service.' Lot Z is in another county.");
+    add("scenic", "The mine train has a 'scenic mode.' It's just slow. It's SLOW mode.");
     if (this.slowSuffered) lines.push("The lines did not move. I aged.");
     if (!lines.length) lines.push("Honestly? Kind of a nice day. Lines were long, I guess.");
     const stars = Math.max(1, 5 - Math.floor(this.misery / 40));

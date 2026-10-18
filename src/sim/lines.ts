@@ -19,6 +19,13 @@ export const AMBIENT = [
   "Someone posts a 1-star review from inside the park. It gets 40 likes.",
   "A ride that “failed to open repeatedly” opens. It's 7:30 PM.",
   "An employee explains that's the old company's policy. Nobody knows which old company.",
+  "One sign in Passport Plaza still says \u201cContinent Zone.\u201d It's been there since 1981.",
+  "Corporate's June rainbow banners in Mirrorball Mile came down July 1. The queens' permanent ones did not.",
+  "The Prairie Line conductor announces the next stop is \u201cprobably Fossil Flats.\u201d",
+  "A Sky Bucket goes by empty. Then another. Then one containing a single shoe.",
+  "None of the fountains in Fountain Circle work. One is full of pennies and a corn dog.",
+  "A sign in Tomorrow Mall reads \u201cNow Leasing.\u201d It has read that since 1997.",
+  "Big Bank of Missouri would like to remind you that AeroGlide is Presented By them.",
 ];
 
 /**
@@ -206,5 +213,43 @@ export const LINES: Record<string, string[]> = {
   megaphone: [
     `{A}: "They said it's closed? Ugh. Fine, somewhere else."`,
     `{A}: "Did that guy just announce it closed? With a megaphone? Okay\u2026"`,
+  ],
+  stuckTrain: [
+    `{A}: "We're stuck between stations. A man is selling water through the window."`,
+    `{A}: "'Signal issue.' There's ONE track. What is it signaling to?"`,
+  ],
+  stuckSky: [
+    `{A}: "We are hanging over a lagoon in a bucket, {B}. A BUCKET."`,
+    `{A}: "The gondola is swaying. I can see a duck judging me."`,
+  ],
+  gas: [
+    `{A}: "The party boat ran out of gas. In a lagoon. That they built."`,
+    `{A}: "We're drifting. The captain is on his phone. I think he's ordering pizza."`,
+  ],
+  rigged: [
+    `{A}: "Forty dollars and the rings don't FIT, {B}. They physically do not fit."`,
+    `{A}: "The guy said nobody's won since 2011. He said it proudly."`,
+  ],
+  gameWin: [`{A}: "I WON! {B}, I WON THE BANANA!"`, `{A}: "High score. Initials: G-A-R. Three letters only. Close enough."`],
+  unplug: [
+    `{A}: "NO. NO. I was ONE LEVEL from the high score!"`,
+    `{A}: "'Power surge.' The guy is holding the plug, {B}."`,
+  ],
+  photoOk: [`{A}: "Okay, that's the one. That's the profile picture."`, `{A}: "Glossy. Bubbly. Very 2008. Love it."`],
+  scaffold: [
+    `{A}: "Scaffolding. Over the WHOLE wall. There's no one working on it."`,
+    `{A}: "We came all this way to take a selfie with scaffolding."`,
+  ],
+  smoke: [
+    `{A}: "I can't see anything. {B}? {B}, where are you?"`,
+    `{A}: "Is this the meteor? Did the meteor happen? Are we extinct?"`,
+  ],
+  tram: [
+    `{A}: "The tram is out of service? Lot Z is in a different TIME ZONE."`,
+    `{A}: "We have to walk to the car. I can see the car. It's so small, {B}."`,
+  ],
+  scenic: [
+    `{A}: "Why is the mine train going two miles an hour?"`,
+    `{A}: "'Scenic Mode.' The scenery is a fence. We've passed the fence three times."`,
   ],
 };

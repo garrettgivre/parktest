@@ -54,3 +54,31 @@ by the minute when the line runs long; bags coming out the other side of the loc
 - KCTV5 sale: https://www.kctv5.com/2026/03/05/six-flags-announces-that-it-is-selling-worlds-fun/
 - 12News Hurricane Harbor fees: https://12news.com/article/news/local/arizona/steep-fees-and-closed-attractions-among-customer-complaints-at-hurricane-harbor-in-glendale/75-d2338564-9684-4260-9355-92ea6793c93c
 - Universal lockers: https://insidethemagic.net/?p=848801
+
+---
+
+# Research: naming and theming (2026-10-18)
+
+Gathered to aim the parody at the right target. Paraphrased.
+
+- **Worlds of Fun's original lands** (1973: Americana, Africa, Scandinavia, Europa, Orient)
+  are critiqued (themerica.org, Dave Gottwald, 2019) as a "design soup": Orient mixed several
+  Asian cultures, Africa had generic "tribal" shacks and fonts, Europa reduced countries to
+  clichés. The verdict was "at least they were trying," then decades of drift to carnival
+  genericness.
+- **What critics object to:** continents treated as one culture, mash-ups, "exotic" framing,
+  explorer/colonizer protagonists, "tribal"/"chop-suey" fonts, ethnic-pun names, sacred
+  objects as decor. **What reads as respectful:** a specific place and era, lived-in towns,
+  real architecture and food, consulting people from that culture.
+- **Corporate naming guests mock:** lost-license renames to generic "Thunder ___," IP
+  bolted on then stripped off, sponsor names, merger confusion (two Halloween brands).
+- **Parody devices that work** (Itchy & Scratchy Land etc.): honest subtitles, sponsors
+  bolted on with a colon, cliché pile-ups ("Thunder X-Treme"), license-lapse fossils,
+  over-promising names on small rides.
+- **Queer-coded land:** make queer people the hosts and stars, root it in disco/ballroom
+  history, aim jokes at corporate rainbow-washing (June banners, rebrand attempts), avoid
+  stereotypes as punchlines.
+
+Sources: themerica.org Worlds of Fun parts 02–03; Smithsonian/NPR on Jungle Cruise; NBC/theGrio
+on Tiana's Bayou Adventure; InsideTheMagic on Epcot; Theme Park Insider on Thunder Striker and the
+merger; Spectrum News on Disneyland Pride Nite.

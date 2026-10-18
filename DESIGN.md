@@ -74,6 +74,44 @@ meat served as the vegan option, barely any decorations.
 - Dialogue variants for every moment, and ambient park awfulness from real reviews.
   See [docs/research.md](docs/research.md).
 
+## v1.3: the rebuilt park
+
+A lumpy loop of 7 lands and 7 blend zones around an irregular lagoon, with Depot Street
+running from the loop out to the Front Gate and Lot Z. Land sizes follow importance.
+
+| Zone | Kind | Between |
+|---|---|---|
+| Depot Street | land (front) | |
+| Exposition Midway | blend | Depot Street ↔ Passport Plaza |
+| Passport Plaza | land | |
+| Bone Wars Basecamp | blend | Passport Plaza ↔ Fossil Flats |
+| Fossil Flats | land (kids) | |
+| Extinction Junction | blend | Fossil Flats ↔ Atomic Acres |
+| Atomic Acres | land (1958's future) | |
+| Tomorrow Mall | blend (1985's future) | Atomic Acres ↔ Aero Heights |
+| Aero Heights | land (2008's future) | |
+| Y2K Plaza | blend | Aero Heights ↔ Mirrorball Mile |
+| Mirrorball Mile | land | |
+| Foam Party Pier | blend | Mirrorball Mile ↔ Landlocked Lagoon |
+| Landlocked Lagoon | land | |
+| Ozark Boardwalk | blend | Landlocked Lagoon ↔ Depot Street |
+
+Plus Fountain Circle (hub on the lagoon), a footbridge across the lagoon via the island,
+the Prairie Line train (stations at Depot Street, Fossil Flats, Aero Heights), the Sky
+Buckets across the lagoon, staff service roads, and a backstage yard with Brad's office.
+
+- **Bleed:** land-wide effects work at full strength in their land and half in the
+  neighbouring blends (DJ loop, splash zone, industrial teacups, app crash). Alibis and
+  meteor smoke spread to neighbours too. Blend ground colours fade between their lands.
+- **Blend moves:** rig the ring toss, Scenic Mode mine train, meteor smoke (hides you from
+  Brad and them from you), arcade power surge, scaffold the Bubble Wall, foam cannons,
+  run the party boat out of gas. Plus stop the train / Sky Buckets (riders get stranded)
+  and take the parking tram "out of service."
+- **Naming rules** (from research, see docs/research.md): every joke targets the company
+  (cheapness, sponsors, rebrands, over-promising), never a culture. Passport Plaza names
+  specific places and the joke is the executives who built it; Mirrorball Mile is run by
+  its own queens and the joke is corporate trying to rename it.
+
 ## v1.2: more systems for the first day
 
 - **Brad the manager** walks the park. Calm below 50 suspicion; patrols your land from 50;

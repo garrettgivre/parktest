@@ -25,7 +25,8 @@ export type ActionId =
   | "scanner" | "close" | "slow" | "fryer" | "veg" | "clog" | "outoforder" | "mascot" | "reader"
   | "wetfloor" | "survey" | "churro" | "voucher" | "radioclose" | "duty"
   | "parade" | "spin" | "jam" | "timeshare" | "appcrash" | "dj" | "splash"
-  | "oldowner" | "upcharge" | "lockers" | "fans" | "monsters" | "megaphone";
+  | "oldowner" | "upcharge" | "lockers" | "fans" | "monsters" | "megaphone"
+  | "rig" | "scenic" | "smoke" | "unplug" | "scaffold" | "foam" | "gas" | "stoptrain" | "stopsky" | "tram";
 
 export interface ActionDef {
   id: ActionId;
@@ -53,18 +54,29 @@ export const ACTIONS: ActionDef[] = [
   { id: "mascot", kinds: ["show"], name: "Mascot no-show", blurb: "The star “calls in sick.” Cancels the next show here.", minutes: 5, susp: 15 },
   { id: "reader", kinds: ["shop"], name: "Card reader down", blurb: "Cash only for 60 min.", minutes: 3, susp: 5, cooldown: 120, duration: 60 },
   { id: "fans", kinds: ["ride"], name: "Unplug the queue fans", blurb: "For 2 hours this line is a sauna. Brutal during the 1\u20134 PM heat advisory.", minutes: 1, susp: 3, cooldown: 150, duration: 120 },
+  { id: "tram", locs: ["gate"], name: "Take the parking tram \u201cout of service\u201d", blurb: "After 7:30 PM. When they leave, they walk to Lot Z. All of it.", minutes: 3, susp: 6 },
+  { id: "stoptrain", kinds: ["station"], name: "Stop the train (\u201csignal issue\u201d)", blurb: "The Prairie Line stops for 30 min. Anyone aboard is stuck between stations.", minutes: 2, susp: 8, cooldown: 150 },
+  { id: "stopsky", kinds: ["station"], name: "Stop the Sky Buckets", blurb: "Gondolas stop for 20 min. Anyone aboard sways over the lagoon, contemplating.", minutes: 2, susp: 9, cooldown: 150 },
   { id: "monsters", locs: ["barn"], name: "Send the monsters on break", blurb: "Haunt only. For 90 min the Scare Barn is a dark barn and a guy eating a pretzel.", minutes: 2, susp: 6, cooldown: 180, duration: 90 },
   { id: "oldowner", kinds: ["relations"], name: "Route complaints to \u201cthe old company\u201d", blurb: "For 2 hours, every complaint is the old owner's policy. They get a gift card for 20% of a souvenir cup.", minutes: 3, susp: 6, cooldown: 180, duration: 120 },
-  { id: "lockers", locs: ["rocket", "aero", "glitter", "leviathan"], name: "Enforce the locker policy", blurb: "For 90 min, lockers here bill by the minute. A long line costs them, and the bag comes out the wrong side.", minutes: 2, susp: 4, cooldown: 180, duration: 90 },
+  { id: "lockers", locs: ["rocket", "aero", "glitter", "leviathan", "meteor"], name: "Enforce the locker policy", blurb: "For 90 min, lockers here bill by the minute. A long line costs them, and the bag comes out the wrong side.", minutes: 2, susp: 4, cooldown: 180, duration: 90 },
   // One signature move per land.
-  { id: "upcharge", locs: ["barn"], signature: true, name: "Add a surprise upcharge", blurb: "For 2 hours the Scare Barn is $25 extra, \u201can exciting new evolution.\u201d They pay. They're furious.", minutes: 3, susp: 6, cooldown: 240, duration: 120 },
-  { id: "parade", locs: ["depot"], signature: true, name: "Call in the parade", blurb: "Four people and a golf cart block Main Street for 30 min. Nobody crosses.", minutes: 3, susp: 7, cooldown: 180, duration: 30 },
-  { id: "spin", locs: ["teacups"], signature: true, name: "Set the teacups to INDUSTRIAL", blurb: "For 60 min, any Around the World ride leaves them queasy: no appetite, sloshing misery.", minutes: 3, susp: 6, cooldown: 150, duration: 60 },
+  { id: "upcharge", locs: ["barn"], name: "Add a surprise upcharge", blurb: "For 2 hours the Scare Barn is $25 extra, \u201can exciting new evolution.\u201d They pay. They're furious.", minutes: 3, susp: 6, cooldown: 240, duration: 120 },
+  { id: "parade", locs: ["emporium"], signature: true, name: "Call in the parade", blurb: "Four people and a golf cart block Depot Street for 30 min. Nobody gets in or out.", minutes: 3, susp: 7, cooldown: 180, duration: 30 },
+  { id: "spin", locs: ["teacups"], signature: true, name: "Set the teacups to INDUSTRIAL", blurb: "For 60 min, rides in Passport Plaza (and sometimes next door) leave them queasy: no appetite.", minutes: 3, susp: 6, cooldown: 150, duration: 60 },
   { id: "jam", locs: ["trex"], signature: true, name: "Jam the animatronic", blurb: "If they're ON T-Rex Trek, they're stuck inside with it roaring for 25 min. Otherwise it just breaks.", minutes: 2, susp: 10, cooldown: 150 },
   { id: "timeshare", locs: ["starlight"], signature: true, name: "Swap in a timeshare presentation", blurb: "The next show is a 40-minute vacation-ownership pitch. They have to sit through it.", minutes: 5, susp: 12 },
-  { id: "appcrash", locs: ["aero"], signature: true, name: "Crash the virtual queue app", blurb: "Anyone in a Future Metropolis line loses their spot. Waits double for 60 min.", minutes: 4, susp: 10, cooldown: 180, duration: 60 },
-  { id: "dj", locs: ["mirrorball"], signature: true, name: "Tell the DJ to loop one song", blurb: "For 60 min, every minute they spend in Rave grinds their soul a little.", minutes: 2, susp: 5, cooldown: 150, duration: 60 },
-  { id: "splash", locs: ["leviathan"], signature: true, name: "Crank the splash zone", blurb: "For 60 min, riding or walking through Ocean soaks them. Soggy for 90 min after.", minutes: 3, susp: 6, cooldown: 150, duration: 60 },
+  { id: "appcrash", locs: ["aero"], signature: true, name: "Crash the virtual queue app", blurb: "Anyone in an Aero Heights line loses their spot. Waits double there (and rise next door) for 60 min.", minutes: 4, susp: 10, cooldown: 180, duration: 60 },
+  { id: "dj", locs: ["club"], signature: true, name: "Tell the DJ to loop one song", blurb: "For 60 min, every minute in Mirrorball Mile grinds their soul. It carries into Y2K Plaza and the Pier.", minutes: 2, susp: 5, cooldown: 150, duration: 60 },
+  // Blend-zone signature moves.
+  { id: "rig", locs: ["ringtoss"], signature: true, name: "Rig the ring toss", blurb: "For 2 hours, the pegs are slightly too wide. Nobody wins the banana.", minutes: 3, susp: 5, cooldown: 180, duration: 120 },
+  { id: "scenic", locs: ["minetrain"], signature: true, name: "Switch to Scenic Mode", blurb: "For 90 min, the mine train takes 20 extra minutes. Great for making them late.", minutes: 2, susp: 5, cooldown: 180, duration: 90 },
+  { id: "smoke", locs: ["meteor"], signature: true, name: "Set off the meteor smoke", blurb: "30 min of smoke here and next door. Brad can't see you; you can't hear them; they crawl.", minutes: 2, susp: 6, cooldown: 150, duration: 30 },
+  { id: "unplug", locs: ["arcade"], signature: true, name: "Trigger a \u201cpower surge\u201d", blurb: "If they're mid-game, their high score dies with the cabinet. Arcade closed 60 min.", minutes: 2, susp: 7, cooldown: 150 },
+  { id: "scaffold", locs: ["bubblewall"], signature: true, name: "Put up scaffolding", blurb: "The Bubble Wall disappears behind scaffolding for 2 hours.", minutes: 6, susp: 5, cooldown: 240 },
+  { id: "foam", locs: ["foampit"], signature: true, name: "Foam cannons to 11", blurb: "For 45 min, anyone on the Pier is soaked. With the DJ loop on, it's a combo.", minutes: 2, susp: 5, cooldown: 150, duration: 45 },
+  { id: "gas", locs: ["cruise"], signature: true, name: "Run the boat out of gas", blurb: "If they're aboard, they're stranded 20 min mid-lagoon. Otherwise closed 45 min.", minutes: 2, susp: 8, cooldown: 150 },
+  { id: "splash", locs: ["leviathan"], signature: true, name: "Crank the splash zone", blurb: "For 60 min, wet rides and walking through the Lagoon (or its neighbours, sometimes) soak them.", minutes: 3, susp: 6, cooldown: 150, duration: 60 },
 ];
 
 // Named combos: rewarded set-ups. Multipliers apply to misery only.
@@ -81,6 +93,8 @@ export const COMBOS: ComboDef[] = [
   { id: "drip", name: "Drip Dry", mult: 1.25, hint: "Anything bad, while they're soaked." },
   { id: "lastcall", name: "Lasting Impression", mult: 1.3, hint: "Ruin something after 9 PM." },
   { id: "branson", name: "Branson Bound", mult: 1.4, hint: "They sit through the whole timeshare pitch." },
+  { id: "wetwild", name: "Wet & Wild Night", mult: 1.5, hint: "Soak them while the DJ loop is playing." },
+  { id: "stranded", name: "Stranded", mult: 1.4, hint: "Trap them aboard something that stops." },
   { id: "nickel", name: "Nickel & Dimed", mult: 1.5, hint: "Charge them for things twice in one day." },
   { id: "stonewall", name: "Thank You for Your Patience", mult: 1.5, hint: "Shut down their complaint." },
 ];
@@ -141,6 +155,17 @@ export function makeDay(rng: () => number) {
   const rides = LOCS.filter((l) => l.kind === "ride");
   const heads = rides.filter((l) => l.headliner);
   const others = rides.filter((l) => !l.headliner && l.id !== "barn");
+  // Sometimes a midway game or the selfie wall is on the list.
+  const extras: WishDef[] = [];
+  if (rng() < 0.6) {
+    const g = pick(rng, LOCS.filter((l) => l.kind === "game"));
+    extras.push(g.id === "ringtoss"
+      ? { id: "game", label: "Win a giant stuffed banana at the Ring Toss", loc: g.id, who: "Gary", weight: 1.1, ask: "I am winning that banana. I am WINNING it." }
+      : { id: "game", label: "Beat the high score at Arcade Galaxy", loc: g.id, who: "Gary", weight: 1.1, ask: "My initials are going on that machine, Deb." });
+  }
+  if (rng() < 0.5) {
+    extras.push({ id: "photo", label: "A photo at The Bubble Wall", loc: "bubblewall", who: "Deb", weight: 1.0, ask: "We HAVE to get a picture at the Bubble Wall." });
+  }
   const wishes: WishDef[] = [];
   const ride = (l: LocDef, weight: number) => wishes.push({
     id: l.id, label: `Ride ${l.name}`, loc: l.id, who: who(), weight,
@@ -164,6 +189,7 @@ export function makeDay(rng: () => number) {
     weight: has("showfan") ? 1.8 : 1.2, ask: `We HAVE to get seats for the ${show.showName}.`,
   });
 
+  wishes.push(...extras);
   wishes.push({
     id: "haunt", label: "Scream at the Scare Barn Haunt (after 7 PM)", loc: "barn", who: who(), weight: 1.3,
     ask: "The Haunt's open! Let's go get SCARED.",

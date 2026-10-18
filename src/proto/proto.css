@@ -245,3 +245,5 @@ button {
 .breakdown i { flex: 1; height: 9px; background: #eee; border-radius: 5px; overflow: hidden; display: block; }
 .breakdown i b { display: block; height: 100%; background: #e74c3c; }
 .breakdown em { width: 34px; text-align: right; font-style: normal; }
+
+#side .sub { font-style: italic; opacity: 0.8; margin-top: -2px; }
