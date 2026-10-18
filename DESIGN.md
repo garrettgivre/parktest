@@ -38,13 +38,45 @@ meat served as the vegan option, barely any decorations.
 - Campaign idea: the park changes owners every season; each new owner changes
   rules, budgets and the tools available to you.
 
+## Gameplay test (v0) — what's in it
+
+Placeholder park name: **Funtier Lands**. One day, 10 AM–10 PM (~4 real minutes at 1×),
+one target group (Deb & Gary Henderson), gray-box map, 8 sabotages + 2 guest actions.
+
+- Guests have a hidden 6-item wishlist; two are known at the start, the rest are revealed
+  as they decide to do them, or by **Eavesdrop**. They also get hungry and need the restroom.
+- After their wishlist rides they keep re-riding things (worth less to ruin), so the
+  afternoon isn't dead.
+- **Close for "maintenance"** is the signature move: closing a ride while they're near
+  the front of its line is worth the most, but costs extra suspicion because they're right there.
+- Suspicion rises per sabotage, more when they witness it, more again when sabotages
+  cluster ("coincidences"), and slowly decays. The park also breaks things on its own
+  twice a day, which *lowers* suspicion (cover).
+- **FastPass** (goodwill): patience +15, misery −5, suspicion −4. Lets a skilled player
+  push harder without sending them home.
+- Score = misery × 1.5 if they stay until close, × 1 if they leave early, × 0.25 if you're fired.
+
+### Balance check (`npm run balance`, 200 simulated days per bot)
+
+| Bot | Score | Outcome (closed / left / fired) |
+|---|---|---|
+| Does nothing | ~1 | 200 / 0 / 0 |
+| Greedy, stops at 60 suspicion | ~170 | 102 / 98 / 0 |
+| Greedy, ignores suspicion | ~47 | 0 / 17 / 183 |
+| Watches suspicion *and* patience, uses FastPass | ~200–220 | ~170 / ~25 / ~5 |
+
+So both failure modes bite, and paying attention beats spamming. Bots are dumb; a human
+who times closures well should do better.
+
 ## Plan
 
-1. Art spike — one small scene rendered Sims-1-style, viewed in landscape on a phone.
-2. Gray-box gameplay prototype — placeholder art, test whether the three meters are fun.
-3. Expand content and art once 1 and 2 hold up.
+1. ~~Art spike~~ — done (`spike.html`).
+2. ~~Gray-box gameplay test~~ — v0 playable (`index.html`). Needs real playtesting.
+3. Next: playtest feedback, then decide what a full game is (more guests? multiple days?
+   the changing-owners campaign?) before investing in art.
 
 ## Open questions
 
 - Danger Park (board game) — which mechanics are worth borrowing?
-- Park name.
+- Final park name (Funtier Lands is a placeholder).
+- Is one group per day enough, or should there be bystanders / multiple targets?

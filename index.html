@@ -4,37 +4,56 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
   <meta name="theme-color" content="#1d3a5c" />
   <title>Park Test</title>
-  <link rel="stylesheet" href="./src/style.css" />
+  <link rel="stylesheet" href="./src/proto/proto.css" />
 </head>
 <body>
   <div id="game"></div>
 
-  <div id="hud">
-    <div class="panel clock">
-      <div class="day">Day 1 · Fright Fest-ish</div>
-      <div class="time" id="time">10:00 AM</div>
-      <div class="speed">
-        <button data-speed="0">❚❚</button>
-        <button data-speed="1" class="on">▶</button>
-        <button data-speed="3">▶▶</button>
-      </div>
-    </div>
-    <div class="panel meters">
-      <div class="target">Target: <b>The Hendersons</b></div>
-      <div class="meter"><span>Misery</span><i><b id="m-misery" style="--v: 10%; --c: #d33"></b></i></div>
-      <div class="meter"><span>Patience</span><i><b id="m-patience" style="--v: 90%; --c: #3b3"></b></i></div>
-      <div class="meter"><span>Suspicion</span><i><b id="m-suspicion" style="--v: 5%; --c: #e90"></b></i></div>
+  <div id="clock" class="panel">
+    <div class="sub">Funtier Lands · Fright Fest-ish</div>
+    <div class="time" id="time">9:55 AM</div>
+    <div class="speed">
+      <button data-speed="0">❚❚</button>
+      <button data-speed="1" class="on">▶</button>
+      <button data-speed="2">▶▶</button>
+      <button data-speed="4">▶▶▶</button>
     </div>
   </div>
-  <div id="toast"></div>
+
+  <div id="meters" class="panel">
+    <div class="score"><span>Misery</span><b id="misery">0</b></div>
+    <div class="meter"><span>Patience</span><i><b id="m-patience" style="--c: #3b3"></b></i></div>
+    <div class="meter"><span>Suspicion</span><i><b id="m-suspicion" style="--c: #e90"></b></i></div>
+  </div>
+
+  <div id="feed"></div>
+  <div id="side" class="panel hidden"></div>
+
+  <div id="intro" class="overlay">
+    <div class="card">
+      <h1>Funtier Lands</h1>
+      <p class="tag">Fright Fest-ish season. Under new ownership. Again.</p>
+      <p>Management has one goal this quarter: guest satisfaction must go <b>down</b>. Today's target: <b>The Hendersons</b> (Deb &amp; Gary).</p>
+      <ul>
+        <li><b>Tap a building</b> to sabotage it. <b>Tap the Hendersons</b> to see what they want.</li>
+        <li><b>Misery</b> is your score. Keep them here until 10 PM for a <b>1.5×</b> bonus.</li>
+        <li>If <b>Patience</b> runs out, they go home early.</li>
+        <li>Make it look like incompetence. If <b>Suspicion</b> hits 100, you're fired.</li>
+      </ul>
+      <button id="start" class="big">Clock in</button>
+    </div>
+  </div>
+
+  <div id="results" class="overlay hidden"><div class="card" id="results-card"></div></div>
 
   <div id="rotate">
     <div>🔄</div>
     <p>Turn your phone sideways.<br /><small>Management insists.</small></p>
   </div>
 
-  <script type="module" src="./src/main.ts"></script>
+  <script type="module" src="./src/proto/main.ts"></script>
 </body>
 </html>

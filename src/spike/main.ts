@@ -174,4 +174,6 @@ function boot() {
   });
   window.addEventListener("resize", () => game.scale.resize(size().w, size().h));
 }
-window.addEventListener("load", () => requestAnimationFrame(() => requestAnimationFrame(boot)));
+const bootSoon = () => requestAnimationFrame(() => requestAnimationFrame(boot));
+if (document.readyState === "complete") bootSoon();
+else window.addEventListener("load", bootSoon);

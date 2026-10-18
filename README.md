@@ -19,3 +19,6 @@ RollerCoaster Tycoon pre-rendered their art.
 npm run sprites             # re-render everything (needs Blender 4.5; set BLENDER=path to override)
 npm run sprites -- bench    # re-render just one prop
 ```
+
+
+```
