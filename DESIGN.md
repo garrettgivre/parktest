@@ -21,7 +21,42 @@ meat served as the vegan option, barely any decorations.
 | Platform | Web game (TypeScript), played on phone via home-screen web app; wrap natively later if released |
 | Art | Sims 1 look via the Sims 1 method: 3D models rendered in Blender at a fixed isometric angle into 2D sprites. Supplemented with images the owner generates in ChatGPT (textures, signs, posters, concept art) |
 
-## Core loop (proposal, untested)
+| You | A physical worker you walk around the park. To sabotage something you have to be there |
+| Structure | Roguelike-ish: each day is a run with a random group, random wishlist and a chosen loadout |
+| Targets | One guest group per day while we build |
+| Manager duties | Yes, but light: one at a time, optional at a cost, never a to-do list |
+
+## Lands (v1)
+
+| Land | Vibe |
+|---|---|
+| Main Street | Front of the park. Midwest main street (KC-ish, not overt): gift shops, BBQ, soda fountain, the gate |
+| Around the World | Different cultures represented: carousel, balloon race, food hall, bazaar |
+| Prehistoric | Dinosaurs; the kid-friendly area |
+| Retro Space | 1950s–60s atomic-age space: rockets, satellites, a theater |
+| Future Metropolis | Frutiger Aero: glossy glass, bubbles, clouds, sky-blue optimism |
+| Rave | Gay disco: mirrorballs, glitter, neon, the nightly club show |
+| Ocean | Water and sea: flume, water coaster, swings around a lagoon |
+
+## v1 loop: worker, duties, loadout
+
+- **Morning briefing:** meet today's group (two traits, two known wishes), then pick
+  **3 of 5 offered tools** for your shift (keys, wet-floor signs, mystery patties,
+  walkie-talkie, golf cart, radio scanner, mascot suit, clipboard, comp vouchers).
+- **You walk.** Tap a building to walk there; actions take minutes of your time. Tap an
+  action while far away to walk there and do it. You can follow the group to listen in.
+- **Intel is local.** You only hear what they say (their next plans) when you're within
+  earshot, unless you packed the radio scanner. So you choose between tailing them for
+  information and running ahead to set things up.
+- **Witnesses:** sabotage within sight of the group costs more suspicion.
+- **Manager duties:** every couple of hours the manager radios one duty somewhere in the
+  park. Doing it lowers suspicion and gives you an alibi in that land for a while
+  (cheaper sabotage there). Skipping it costs suspicion. That's it.
+- **Space matters:** guests use the nearest restroom, food and route. Closing the
+  restroom near the 60-minute coaster line, or blocking a junction so they detour, are
+  set-ups that pay off later.
+
+## Core loop (v0 proposal, superseded by v1 above where they differ)
 
 - One run = one park day, ~5 minutes of play, with Sims-style pause/speed controls.
 - One guest group per day with a wishlist (ride X, eat Y, see the show) and traits
@@ -68,15 +103,28 @@ one target group (Deb & Gary Henderson), gray-box map, 8 sabotages + 2 guest act
 So both failure modes bite, and paying attention beats spamming. Bots are dumb; a human
 who times closures well should do better.
 
+### v1 balance check (`npm run balance`, 150 days per bot)
+
+| Bot | Score | Outcome (closed / left / fired) |
+|---|---|---|
+| Does nothing | ~6 | 150 / 0 / 0 |
+| Reckless (ignores suspicion) | ~84 | 0 / 58 / 92 |
+| Careful, skips duties | ~137 | 133 / 17 / 0 |
+| Careful, does duties | ~179 | 114 / 36 / 0 |
+| Careful + comp vouchers | ~186 | 129 / 21 / 0 |
+
+Duties are worth doing (alibi + suspicion relief), and loadouts change results.
+
 ## Plan
 
 1. ~~Art spike~~ — done (`spike.html`).
-2. ~~Gray-box gameplay test~~ — v0 playable (`index.html`). Needs real playtesting.
-3. Next: playtest feedback, then decide what a full game is (more guests? multiple days?
-   the changing-owners campaign?) before investing in art.
+2. ~~Gray-box gameplay test v0~~ — too fast, too few decisions, park too small.
+3. ~~v1~~ — big park with 7 lands, walking worker, local intel, light duties, loadout.
+4. Next: playtest v1. Then likely: more sabotage set-ups per land, a run-to-run
+   meta (the owners changing hands), then art.
 
 ## Open questions
 
 - Danger Park (board game) — which mechanics are worth borrowing?
 - Final park name (Funtier Lands is a placeholder).
-- Is one group per day enough, or should there be bystanders / multiple targets?
+- Should time pause while a building's menu is open?

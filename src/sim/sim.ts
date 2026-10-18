@@ -1,11 +1,33 @@
-// Gameplay-test simulation. Pure logic, no rendering: time is in game minutes
-// since midnight, positions are in tiles. The UI calls step() and sabotage().
+// Gameplay simulation, v1. Pure logic, no rendering. Time is in game minutes
+// since midnight; positions are in tiles (i, j). The UI calls step(), the
+// worker commands (walkTo / doAction / setFollow) and reads the state.
 
 import {
-  CLOSE, GUEST_NAMES, LOCS, LocDef, OPEN, SABOTAGES, SabDef, SabId, WISHLIST, WishDef,
-} from "./data";
+  ACTIONS, ActionDef, ActionId, SPECIAL, TOOL, ToolId, TraitId, WishDef, dutyText, makeDay,
+} from "./content";
+import { LOC, LOCS, LocDef, LandId, NODES, shortest } from "./park";
+
+export const OPEN = 10 * 60;
+export const CLOSE = 22 * 60;
+
+const STEP = 0.5;
+const GUEST_SPEED = 1.5; // tiles per game minute
+const WORKER_SPEED = 1.9;
+const EARSHOT = 9; // tiles
+const WITNESS = 5;
+const REACH = 2.5; // how close you must be to talk to them
+const PATIENCE_HIT = 1.3;
+const REPEAT_WEIGHT = 0.7;
 
 export interface P { i: number; j: number }
+const dist = (a: P, b: P) => Math.hypot(a.i - b.i, a.j - b.j);
+
+export function fmtTime(min: number) {
+  const h = Math.floor(min / 60) % 24, m = Math.floor(min % 60);
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+}
+
+interface Mover { pos: P; route: string[]; prev: string }
 
 export interface LocState {
   def: LocDef;
@@ -16,129 +38,201 @@ export interface LocState {
   readerUntil: number;
   showCancelled: boolean;
   scannerBroken: boolean;
-  readyAt: Partial<Record<SabId, number>>;
-  used: Set<SabId>;
+  readyAt: Partial<Record<ActionId, number>>;
 }
 
 export interface Wish { def: WishDef; done: boolean; failed: boolean; revealed: boolean; fails: number; retryAt: number }
 
-type Purpose = "wish" | "food" | "restroom" | "show" | "shop" | "rest" | "exit" | "gate";
+type Purpose = "wish" | "ride" | "food" | "restroom" | "show" | "shop" | "exit" | "gate";
 interface Goal { loc: string; purpose: Purpose; wish?: Wish }
 
 type Act =
-  | { t: "walk"; path: P[]; goal: Goal }
+  | { t: "walk"; goal: Goal }
   | { t: "queue"; loc: string; total: number; left: number; wish?: Wish }
-  | { t: "busy"; loc: string; left: number; what: string; done?: () => void }
+  | { t: "busy"; loc: string | null; left: number; what: string; done?: () => void }
   | { t: "gone" };
 
-export type LogKind = "guest" | "you" | "park" | "bad" | "good";
+export type LogKind = "guest" | "you" | "park" | "bad" | "good" | "boss";
 export interface LogEntry { time: number; text: string; kind: LogKind }
-export interface Hit { time: number; reason: string; misery: number }
 export type EndReason = "closed" | "left" | "fired";
 
-const WALK = 0.7; // tiles per game minute
-const STEP = 0.5;
-const REPEAT_WEIGHT = 0.7; // ruining a repeat ride hurts less than a wishlist one
-const PATIENCE_HIT = 1.3; // tuned so greedy play risks sending them home early
+export interface Duty { loc: string; deadline: number; text: string }
 
-export function fmtTime(min: number) {
-  const h = Math.floor(min / 60) % 24, m = Math.floor(min % 60);
-  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, "0")} ${h < 12 ? "AM" : "PM"}`;
+export type Target = { kind: "loc"; id: string } | { kind: "node"; id: string } | { kind: "guests" };
+interface Task { action: ActionDef; target: Target; left: number; total: number }
+
+export interface ActionView {
+  def: ActionDef;
+  why: string | null; // reason it can't be done right now
+  susp: number;
+  walk: number; // minutes to walk there first (0 = you're there)
 }
 
 export class Sim {
   time = OPEN - 5;
+  rng: () => number;
+  traits: TraitId[];
+  wishes: Wish[];
   locs: Record<string, LocState> = {};
   suspicion = 0;
   misery = 0;
   patience = 100;
-  hunger = 20;
+  hunger = 15;
   bladder = 10;
-  pos: P;
-  act: Act;
-  wishes: Wish[];
+  g: Mover & { act: Act };
+  w: Mover & { task: Task | null; pending: { target: Target; action?: ActionDef } | null; follow: boolean };
+  tools: Partial<Record<ToolId, number>> = {};
+  blocked: Record<string, number> = {};
+  duty: Duty | null = null;
+  dutiesDone = 0;
+  dutiesMissed = 0;
+  alibi: { land: LandId; until: number } | null = null;
   thought = "";
   thoughtUntil = 0;
-  hits: Hit[] = [];
-  sabLog: number[] = []; // times you sabotaged
   log: LogEntry[] = [];
+  pauses: string[] = [];
   ended: { why: EndReason; at: number } | null = null;
-  eavesdropReady = OPEN;
-  fastPassReady = OPEN;
+  churroReady = 0;
   slowSuffered = false;
-  private lastRide = "";
+  private hits: { time: number; reason: string }[] = [];
+  private sabLog: number[] = [];
   private breakdowns: number[];
+  private nextDutyAt = 10 * 60 + 40;
   private leaving = false;
-  private rng: () => number;
+  private lastRide = "";
+  private closedSeen: Record<string, number> = {}; // restrooms/food they found closed
+  private followTimer = 0;
 
   constructor(seed = Date.now()) {
     this.rng = mulberry32(seed);
     for (const def of LOCS) {
       this.locs[def.id] = {
         def, closedUntil: 0, closedBy: null, slowUntil: 0, vegSwap: false, readerUntil: 0,
-        showCancelled: false, scannerBroken: false, readyAt: {}, used: new Set(),
+        showCancelled: false, scannerBroken: false, readyAt: {},
       };
     }
-    this.wishes = WISHLIST.map((def) => ({ def, done: false, failed: false, revealed: false, fails: 0, retryAt: 0 }));
-    // You start knowing two things they want.
+    const day = makeDay(this.rng);
+    this.traits = day.traits;
+    this.wishes = day.wishes.map((def) => ({ def, done: false, failed: false, revealed: false, fails: 0, retryAt: 0 }));
     for (const w of this.shuffle([...this.wishes]).slice(0, 2)) w.revealed = true;
-    // The park also breaks things all by itself. That's your cover.
-    this.breakdowns = [this.between(11 * 60, 15 * 60), this.between(15 * 60, 20 * 60)];
-    const gate = this.door("entrance");
-    this.pos = { i: gate.i + 3.5, j: gate.j };
-    this.act = { t: "walk", path: [gate], goal: { loc: "entrance", purpose: "gate" } };
+    this.breakdowns = [this.between(11 * 60, 14 * 60), this.between(14 * 60, 17 * 60), this.between(17 * 60, 20 * 60)];
+    const gate = NODES.G;
+    this.g = { pos: { i: gate.i + 2, j: gate.j + 2 }, route: ["G"], prev: "G", act: { t: "walk", goal: { loc: "gate", purpose: "gate" } } };
+    this.w = { pos: { i: NODES.M1.i, j: NODES.M1.j }, route: [], prev: "M1", task: null, pending: null, follow: false };
     this.note("The Hendersons are pulling up to the Front Gate. Those ticket scanners look… fragile.", "park");
   }
 
-  // ------------------------------------------------------------- helpers
+  // ------------------------------------------------------------- loadout
+
+  equip(ids: ToolId[]) {
+    this.tools = {};
+    for (const id of ids) this.tools[id] = TOOL[id].charges ?? Infinity;
+  }
+  has(id: ToolId) { return (this.tools[id] ?? 0) > 0; }
+  trait(id: TraitId) { return this.traits.includes(id); }
+
+  // ------------------------------------------------------------- queries
 
   loc(id: string) { return this.locs[id]; }
   isClosed(id: string) { return this.locs[id].closedUntil > this.time; }
   isSlow(id: string) { return this.locs[id].slowUntil > this.time; }
+  isBlocked(node: string) { return (this.blocked[node] ?? 0) > this.time; }
+  blockedSet() { return new Set(Object.keys(this.blocked).filter((n) => this.isBlocked(n))); }
 
   currentWait(id: string) {
-    const l = this.locs[id];
-    const base = l.def.baseWait ?? 10;
-    // Lines peak mid-afternoon.
+    const def = this.locs[id].def;
+    const base = def.baseWait ?? 10;
     const h = this.time / 60;
     const crowd = 0.6 + 0.6 * Math.exp(-((h - 15) ** 2) / 8);
     return Math.round(base * crowd * (this.isSlow(id) ? 2 : 1));
   }
 
-  guestsAt(id: string) {
-    if (this.act.t === "queue" || this.act.t === "busy") return this.act.loc === id;
-    const c = this.locs[id].def;
-    return Math.hypot(this.pos.i - c.i, this.pos.j - c.j) < Math.max(c.w, c.d) / 2 + 1.2;
+  workerSpeed() { return WORKER_SPEED * (this.has("cart") ? 1.8 : 1); }
+  heard() { return this.has("radio") || dist(this.w.pos, this.g.pos) <= EARSHOT; }
+  nearGuests(r = REACH) { return this.g.act.t !== "gone" && dist(this.w.pos, this.g.pos) <= r; }
+  workerAt(node: string) { return !this.w.route.length && dist(this.w.pos, NODES[node]) < 0.05; }
+  guestsAtLoc(id: string) {
+    const a = this.g.act;
+    if ((a.t === "queue" || a.t === "busy") && a.loc === id) return true;
+    return dist(this.g.pos, NODES[this.locs[id].def.node]) < 2;
   }
 
   activity(): string {
-    const a = this.act;
+    const a = this.g.act;
     if (a.t === "gone") return "Gone home";
-    if (a.t === "walk") return `Walking to ${this.locs[a.goal.loc].def.name}`;
-    if (a.t === "queue") return `In line for ${this.locs[a.loc].def.name} (${Math.ceil(a.left)} min left)`;
+    if (a.t === "walk") return this.heard() ? `Walking to ${LOC[a.goal.loc].name}` : "Walking somewhere… (too far to hear)";
+    if (a.t === "queue") return `In line for ${LOC[a.loc].name} (${Math.ceil(a.left)} min left)`;
     return a.what;
   }
 
-  door(id: string): P {
-    const c = this.locs[id].def;
-    const hub = this.locs.hub.def;
-    if (id === "hub") return { i: hub.i, j: hub.j };
-    const dx = hub.i - c.i, dy = hub.j - c.j, n = Math.hypot(dx, dy) || 1;
-    const r = Math.max(c.w, c.d) / 2 + 0.35;
-    return { i: c.i + (dx / n) * r, j: c.j + (dy / n) * r };
+  workerStatus(): string {
+    const w = this.w;
+    if (w.task) return `${w.task.action.name} (${Math.ceil(w.task.left)} min)`;
+    if (w.follow) return "Tailing the Hendersons";
+    if (w.route.length) return w.pending?.action ? `Walking to: ${w.pending.action.name}` : "Walking";
+    return "Standing around, looking busy";
   }
 
-  private say(text: string, kind: LogKind = "guest", secs = 14) {
+  /** Minutes for the worker to walk to a node. */
+  walkMinutes(node: string) {
+    return this.routeCost(this.w, node, new Set()) / this.workerSpeed();
+  }
+
+  // ------------------------------------------------------------- movement
+
+  private routeCost(m: Mover, target: string, blocked: Set<string>) {
+    return this.plan(m, target, blocked)?.cost ?? Infinity;
+  }
+
+  private plan(m: Mover, target: string, blocked: Set<string>) {
+    const a = m.prev, b = m.route[0];
+    const opts: { cost: number; route: string[] }[] = [];
+    const ra = shortest(a, target, blocked);
+    if (ra) {
+      const d = dist(m.pos, NODES[a]);
+      opts.push({ cost: d + ra.len, route: d < 0.05 ? ra.path.slice(1) : ra.path });
+    }
+    if (b && b !== a) {
+      const rb = shortest(b, target, blocked);
+      if (rb) opts.push({ cost: dist(m.pos, NODES[b]) + rb.len, route: rb.path });
+    }
+    if (!opts.length) return null;
+    return opts.sort((x, y) => x.cost - y.cost)[0];
+  }
+
+  private routeTo(m: Mover, target: string, blocked = new Set<string>()) {
+    const p = this.plan(m, target, blocked) ?? this.plan(m, target, new Set());
+    m.route = p ? p.route : [];
+  }
+
+  /** Advance a mover; returns true when it has arrived (route empty). */
+  private move(m: Mover, speed: number, dt: number) {
+    let left = speed * dt;
+    while (left > 0 && m.route.length) {
+      const n = NODES[m.route[0]];
+      const d = dist(m.pos, n);
+      if (d <= left) {
+        m.pos = { i: n.i, j: n.j };
+        m.prev = m.route.shift()!;
+        left -= d;
+      } else {
+        m.pos = { i: m.pos.i + ((n.i - m.pos.i) / d) * left, j: m.pos.j + ((n.j - m.pos.j) / d) * left };
+        left = 0;
+      }
+    }
+    return !m.route.length;
+  }
+
+  // ------------------------------------------------------------- logging
+
+  private say(text: string, kind: LogKind = "guest", always = false) {
+    if (!always && !this.heard()) return;
     this.thought = text;
-    this.thoughtUntil = this.time + secs;
+    this.thoughtUntil = this.time + 14;
     this.note(text, kind);
   }
-
-  private note(text: string, kind: LogKind) {
-    this.log.push({ time: this.time, text, kind });
-  }
-
-  private who(w?: Wish) { return w?.def.who ?? GUEST_NAMES[Math.floor(this.rng() * 2)]; }
+  private note(text: string, kind: LogKind) { this.log.push({ time: this.time, text, kind }); }
+  private who(w?: Wish) { return w?.def.who ?? (this.rng() < 0.5 ? "Deb" : "Gary"); }
   private between(a: number, b: number) { return a + this.rng() * (b - a); }
   private shuffle<T>(xs: T[]) {
     for (let k = xs.length - 1; k > 0; k--) {
@@ -147,21 +241,16 @@ export class Sim {
     }
     return xs;
   }
+  private recent(times: number[], window = 90) { return times.filter((t) => this.time - t < window).length; }
 
-  private recent(times: number[], window = 90) {
-    return times.filter((t) => this.time - t < window).length;
-  }
-
-  /** Ruin something. `yours` = caused by your sabotage (counts for suspicion). */
   private hurt(misery: number, patience: number, reason: string, yours = true) {
     this.misery += misery;
     this.patience -= patience * PATIENCE_HIT;
     if (yours) {
-      // Coincidences pile up: each recent hit makes the next one more suspicious.
-      this.suspicion += 2 * this.recent(this.hits.map((h) => h.time));
-      this.hits.push({ time: this.time, reason, misery });
+      this.suspicion += 2 * this.recent(this.hits.filter((h) => !h.reason.startsWith("park:")).map((h) => h.time));
+      this.hits.push({ time: this.time, reason });
     } else {
-      this.hits.push({ time: this.time, reason: "park:" + reason, misery });
+      this.hits.push({ time: this.time, reason: "park:" + reason });
     }
   }
 
@@ -170,111 +259,231 @@ export class Sim {
     this.patience = Math.min(100, this.patience + patience);
   }
 
-  // ------------------------------------------------------------- sabotage
+  // ------------------------------------------------------------- worker commands
 
-  sabotagesFor(id: string): SabDef[] {
-    const kind = this.locs[id].def.kind;
-    return SABOTAGES.filter((s) => s.kinds.includes(kind));
+  walkTo(node: string) {
+    if (this.ended || this.w.task) return;
+    this.w.follow = false;
+    this.w.pending = null;
+    this.routeTo(this.w, node);
   }
 
-  canSabotage(id: string, sab: SabDef): string | null {
-    const l = this.locs[id];
-    if (this.ended) return "Day's over";
-    if (sab.once && l.used.has(sab.id)) return "Already used";
-    const ready = l.readyAt[sab.id] ?? 0;
-    if (ready > this.time) return `Ready ${fmtTime(ready)}`;
-    if (sab.id === "scanner" && this.act.t !== "walk" && !(this.act.t === "busy" && this.act.loc === "entrance"))
-      return "They're already inside";
-    if (sab.id === "veg" && l.vegSwap) return "Already swapped";
-    if ((sab.id === "close" || sab.id === "fryer" || sab.id === "outoforder") && this.isClosed(id)) return "Already closed";
+  setFollow(on: boolean) {
+    this.w.follow = on;
+    this.w.pending = null;
+    this.followTimer = 0;
+    if (!on) this.w.route = [];
+  }
+
+  /** Everything you could do at a target, with why-not reasons and costs. */
+  actionsFor(target: Target): ActionView[] {
+    const defs: ActionDef[] = [];
+    if (target.kind === "loc") {
+      const kind = this.locs[target.id].def.kind;
+      if (this.duty?.loc === target.id) defs.push(SPECIAL.duty);
+      for (const a of ACTIONS) {
+        if (!a.kinds?.includes(kind)) continue;
+        if (a.tool && !(a.tool in this.tools)) continue;
+        if (a.withoutTool && a.withoutTool in this.tools) continue;
+        defs.push(a);
+      }
+      if (kind === "ride" && "walkie" in this.tools) defs.push(SPECIAL.radioclose);
+    } else if (target.kind === "node") {
+      if ("wetfloor" in this.tools) defs.push(SPECIAL.wetfloor);
+    } else {
+      defs.push(SPECIAL.churro);
+      if ("clipboard" in this.tools) defs.push(SPECIAL.survey);
+      if ("vouchers" in this.tools) defs.push(SPECIAL.voucher);
+    }
+    return defs.map((def) => ({
+      def,
+      why: this.cantDo(target, def),
+      susp: this.suspCost(target, def),
+      walk: this.walkFor(target, def),
+    }));
+  }
+
+  private targetNode(t: Target) {
+    if (t.kind === "loc") return this.locs[t.id].def.node;
+    if (t.kind === "node") return t.id;
     return null;
   }
 
-  suspicionCost(id: string, sab: SabDef) {
-    let c = sab.susp;
-    if (this.guestsAt(id)) c *= 1.5; // they saw you do it
-    if (this.suspicion >= 75) c *= 1.5; // management is watching
+  private walkFor(t: Target, def: ActionDef) {
+    if (def.id === "radioclose") return 0;
+    if (t.kind === "guests") return this.nearGuests() ? 0 : dist(this.w.pos, this.g.pos) / this.workerSpeed();
+    const n = this.targetNode(t)!;
+    return this.workerAt(n) ? 0 : this.walkMinutes(n);
+  }
+
+  private cantDo(t: Target, a: ActionDef): string | null {
+    if (this.ended) return "Day's over";
+    if (this.w.task) return "You're busy";
+    if (a.tool && !this.has(a.tool)) return "Out of charges";
+    if (a.id === "churro" && this.churroReady > this.time) return `Ready ${fmtTime(this.churroReady)}`;
+    if (t.kind === "guests") {
+      if (this.g.act.t === "gone") return "They're gone";
+      if (a.id === "survey" && this.g.act.t !== "walk") return "Only while they're walking";
+      return null;
+    }
+    if (t.kind === "node") return this.isBlocked(t.id) ? "Already blocked" : null;
+    const l = this.locs[t.id];
+    const ready = l.readyAt[a.id] ?? 0;
+    if (ready > this.time) return `Ready ${fmtTime(ready)}`;
+    switch (a.id) {
+      case "scanner": {
+        const g = this.g.act;
+        const outside = (g.t === "walk" && g.goal.purpose === "gate") || (g.t === "busy" && g.loc === "gate");
+        if (!outside) return "They're already inside";
+        return l.scannerBroken ? "Already broken" : null;
+      }
+      case "close": case "radioclose": case "fryer": case "clog": case "outoforder":
+        return this.isClosed(t.id) ? "Already closed" : null;
+      case "veg":
+        if (!l.def.vegan) return "No vegan menu here";
+        return l.vegSwap ? "Already swapped" : null;
+      case "mascot":
+        if (l.showCancelled) return "Already cancelled";
+        return (l.def.shows ?? []).some((s) => s > this.time) ? null : "No more shows today";
+      case "duty":
+        return this.duty?.loc === t.id ? null : "No duty here";
+    }
+    return null;
+  }
+
+  suspCost(t: Target, a: ActionDef) {
+    if (a.susp <= 0) return a.susp;
+    let c = a.susp;
+    // Witnessed: the group is near where it happens.
+    const where = t.kind === "guests" ? null : this.targetNode(t);
+    const seen = where ? dist(this.g.pos, NODES[where]) <= WITNESS : false;
+    if (seen && !this.has("mascot")) c *= 1.5;
+    const land = t.kind === "loc" ? this.locs[t.id].def.land : t.kind === "node" ? NODES[t.id].land : null;
+    if (land && this.alibi && this.alibi.land === land && this.alibi.until > this.time) c *= 0.6;
+    if (this.suspicion >= 75) c *= 1.5;
     return Math.round(c + 3 * this.recent(this.sabLog));
   }
 
-  sabotage(id: string, sab: SabDef) {
-    if (this.canSabotage(id, sab)) return;
-    const l = this.locs[id];
-    const name = l.def.name;
-    this.suspicion += this.suspicionCost(id, sab);
-    this.sabLog.push(this.time);
-    l.used.add(sab.id);
-    l.readyAt[sab.id] = this.time + sab.cooldown;
-    const until = this.time + (sab.duration ?? 0);
+  isWitnessed(t: Target) {
+    const where = t.kind === "guests" ? null : this.targetNode(t);
+    return !!where && !this.has("mascot") && dist(this.g.pos, NODES[where]) <= WITNESS;
+  }
 
-    switch (sab.id) {
-      case "scanner":
-        l.scannerBroken = true;
-        this.note("Scanners are “down.” Staff instructed to mime scanning.", "you");
-        if (this.act.t === "busy" && this.act.loc === "entrance") this.mimed();
-        break;
-      case "close":
-        this.note(`${name} closed for “maintenance.”`, "you");
-        this.closeLoc(id, until, "you");
-        break;
-      case "slow":
-        l.slowUntil = until;
-        this.note(`${name} is now running one car.`, "you");
-        break;
-      case "veg":
-        l.vegSwap = true;
-        this.note("Vegan patties replaced with “basically vegan” patties.", "you");
-        break;
-      case "fryer":
-        this.note("The fryer is “down.” Chow Barn closed.", "you");
-        this.closeLoc(id, until, "you");
-        break;
-      case "outoforder":
-        this.note("Restrooms: OUT OF ORDER.", "you");
-        this.closeLoc(id, until, "you");
-        break;
-      case "mascot":
-        l.showCancelled = true;
-        this.note("Pumpkin Pete called in “sick.” The 7 PM Revue is cancelled.", "you");
-        break;
-      case "reader":
-        l.readerUntil = until;
-        this.note("Gift Shoppe card reader unplugged. Cash only.", "you");
-        break;
+  hasAlibi(land: LandId) { return !!this.alibi && this.alibi.land === land && this.alibi.until > this.time; }
+
+  /** Do an action; walks there first if needed. Returns false if it can't. */
+  doAction(t: Target, def: ActionDef) {
+    if (this.cantDo(t, def)) return false;
+    this.w.follow = false;
+    if (this.walkFor(t, def) === 0) {
+      this.startTask(t, def);
+    } else {
+      this.w.pending = { target: t, action: def };
+      if (t.kind !== "guests") this.routeTo(this.w, this.targetNode(t)!);
+    }
+    return true;
+  }
+
+  cancelTask() {
+    this.w.pending = null;
+    if (this.w.task?.action.id === "survey") return; // you can't escape a survey you started
+    this.w.task = null;
+  }
+
+  private startTask(t: Target, def: ActionDef) {
+    this.w.pending = null;
+    this.w.route = [];
+    this.w.task = { action: def, target: t, left: def.minutes, total: def.minutes };
+    if (def.id === "survey") {
+      this.g.route = [];
+      this.g.act = { t: "busy", loc: null, left: 15, what: "Trapped in a “quick survey”" };
+      this.say(`Gary: "I—sure. Quick, right?"`, "guest", true);
     }
   }
 
-  eavesdrop(): string | null {
-    if (this.ended) return null;
-    if (this.eavesdropReady > this.time) return null;
-    const hidden = this.wishes.filter((w) => !w.revealed);
-    if (!hidden.length) return null;
-    const w = hidden[Math.floor(this.rng() * hidden.length)];
-    w.revealed = true;
-    this.eavesdropReady = this.time + 60;
-    this.suspicion += 2;
-    this.note(`Overheard ${w.def.who}: wants to ${w.def.label.toLowerCase()}.`, "you");
-    return w.def.label;
-  }
+  private finishTask(task: Task) {
+    const { action: a, target: t } = task;
+    const cost = this.suspCost(t, a);
+    if (a.tool && TOOL[a.tool].charges) this.tools[a.tool]! -= 1;
+    if (a.cooldown && t.kind === "loc") this.locs[t.id].readyAt[a.id] = this.time + a.cooldown;
+    if (a.susp > 0) this.sabLog.push(this.time);
+    this.suspicion = Math.max(0, this.suspicion + cost);
+    const until = this.time + (a.duration ?? 0);
 
-  /** Goodwill: buy back patience (and a little cover) at the cost of misery. */
-  fastPass(): boolean {
-    if (this.ended || this.fastPassReady > this.time || this.act.t === "gone") return false;
-    this.fastPassReady = this.time + 90;
-    this.joy(5, 15);
-    this.suspicion = Math.max(0, this.suspicion - 4);
-    const a = this.act;
-    if (a.t === "queue") a.left = Math.min(a.left, 2);
-    this.say(`Gary: "A free FastPass? Okay, this place isn't ALL bad."`, "good");
-    this.note("You handed them a FastPass. So generous. So deniable.", "you");
-    return true;
+    if (t.kind === "guests") {
+      if (a.id === "churro") {
+        this.churroReady = this.time + (a.cooldown ?? 90);
+        this.joy(0, 6);
+        this.say(`Deb: "Oh! A free churro. Thank you, sweetie."`, "good", true);
+      } else if (a.id === "voucher") {
+        this.joy(5, 15);
+        const g = this.g.act;
+        if (g.t === "queue") g.left = Math.min(g.left, 2);
+        this.say(`Gary: "A free FastPass? Okay, this place isn't ALL bad."`, "good", true);
+      } else if (a.id === "survey") {
+        this.hurt(5, 3, "survey");
+        this.say(`Deb: "That was NOT a quick survey."`, "bad", true);
+      }
+      return;
+    }
+    if (t.kind === "node") {
+      this.blocked[t.id] = until;
+      this.note("Wet Floor sign deployed. The floor is not wet.", "you");
+      return;
+    }
+
+    const l = this.locs[t.id];
+    const name = l.def.name;
+    switch (a.id) {
+      case "duty":
+        this.dutiesDone++;
+        this.duty = null;
+        this.suspicion = Math.max(0, this.suspicion - 6);
+        this.alibi = { land: l.def.land, until: this.time + 60 };
+        this.nextDutyAt = this.time + this.between(90, 130);
+        this.note(`Duty done. Manager: "Noted." (You have an alibi around here for an hour.)`, "boss");
+        return;
+      case "scanner":
+        l.scannerBroken = true;
+        this.note("Scanners are “down.” Staff instructed to mime scanning.", "you");
+        if (this.g.act.t === "busy" && this.g.act.loc === "gate") this.mimed();
+        return;
+      case "close": case "radioclose":
+        this.note(`${name} closed for “maintenance.”`, "you");
+        this.closeLoc(t.id, until, "you");
+        return;
+      case "slow":
+        l.slowUntil = until;
+        this.note(`${name} is now running one car.`, "you");
+        return;
+      case "fryer":
+        this.note(`The fryer at ${name} is “down.”`, "you");
+        this.closeLoc(t.id, until, "you");
+        return;
+      case "clog": case "outoforder":
+        this.note(`${name}: OUT OF ORDER.`, "you");
+        this.closeLoc(t.id, until, "you");
+        return;
+      case "veg":
+        l.vegSwap = true;
+        this.note(`Vegan patties at ${name} replaced with “basically vegan” patties.`, "you");
+        return;
+      case "mascot":
+        l.showCancelled = true;
+        this.note(`The star of the ${l.def.showName} called in “sick.” Next show cancelled.`, "you");
+        return;
+      case "reader":
+        l.readerUntil = until;
+        this.note(`${name} card reader unplugged. Cash only.`, "you");
+        return;
+    }
   }
 
   private closeLoc(id: string, until: number, by: "you" | "park") {
     const l = this.locs[id];
     l.closedUntil = until;
     l.closedBy = by;
-    const a = this.act;
+    const a = this.g.act;
     if (a.t === "queue" && a.loc === id) {
       const progress = 1 - a.left / a.total;
       const weight = a.wish?.def.weight ?? REPEAT_WEIGHT;
@@ -282,12 +491,12 @@ export class Sim {
       this.hurt((10 + 35 * progress) * weight, 6 + 20 * progress, front ? "closedFront" : "closed", by === "you");
       this.say(front
         ? `${this.who(a.wish)}: "We were RIGHT THERE. ${Math.round(a.total - a.left)} minutes!"`
-        : `${this.who(a.wish)}: "It's closing? We just got in line."`, "bad");
+        : `${this.who(a.wish)}: "It's closing? We just got in line."`, "bad", true);
       if (a.wish) this.failWish(a.wish);
       this.decide();
-    } else if (a.t === "busy" && a.loc === id && id === "food") {
+    } else if (a.t === "busy" && a.loc === id && l.def.kind === "food") {
       this.hurt(8, 8, "fryer", by === "you");
-      this.say(`Deb: "They're kicking us out mid-bite?"`, "bad");
+      this.say(`Deb: "They're kicking us out mid-bite?"`, "bad", true);
       this.decide();
     }
   }
@@ -304,71 +513,85 @@ export class Sim {
 
   private mimed() {
     this.hurt(10, 8, "scanner");
-    this.act = { t: "busy", loc: "entrance", left: 30, what: "Being mimed at by the ticket guy" };
-    this.say(`Gary: "Did it… beep? Is that a yes?"`, "bad");
+    this.g.act = { t: "busy", loc: "gate", left: 30, what: "Being mimed at by the ticket guy" };
+    this.say(`Gary: "Did it… beep? Is that a yes?"`, "bad", true);
   }
 
   // ------------------------------------------------------------- guest AI
 
   private goTo(goal: Goal) {
-    const target = this.door(goal.loc);
-    const hub = this.door("hub");
-    const atHub = Math.hypot(this.pos.i - hub.i, this.pos.j - hub.j) < 1.5;
-    const path = goal.loc === "hub" || atHub ? [target] : [hub, target];
-    this.act = { t: "walk", path, goal };
+    this.g.act = { t: "walk", goal };
+    this.routeTo(this.g, LOC[goal.loc].node, this.blockedSet());
   }
 
-  private nextWish(): Wish | undefined {
-    const rides = this.wishes.filter(
-      (w) => this.locs[w.def.loc].def.kind === "ride" && !w.done && !w.failed && w.retryAt <= this.time,
-    );
-    return rides.sort((a, b) => b.def.weight - a.def.weight)[0];
+  private pathLen(loc: string) {
+    return this.routeCost(this.g, LOC[loc].node, this.blockedSet());
   }
 
-  private wish(id: string) { return this.wishes.find((w) => w.def.id === id)!; }
+  private nearest(kind: "restroom" | "food") {
+    const opts = LOCS.filter((l) => l.kind === kind && (this.closedSeen[l.id] ?? 0) <= this.time);
+    return opts.map((l) => ({ l, d: this.pathLen(l.id) })).sort((a, b) => a.d - b.d)[0]?.l;
+  }
+
+  private wish(id: string) { return this.wishes.find((w) => w.def.id === id); }
+  private open(w?: Wish): w is Wish { return !!w && !w.done && !w.failed; }
 
   private decide() {
     const t = this.time;
-    if (this.leaving || this.patience <= 0 || t >= CLOSE - 15) {
+    if (this.leaving || this.patience <= 0 || t >= CLOSE - 25) {
       if (!this.leaving) {
         this.leaving = true;
-        if (this.patience <= 0) this.say(`Deb: "That's it. We're going home."`, "bad");
+        if (this.patience <= 0) this.say(`Deb: "That's it. We're going home."`, "bad", true);
       }
-      return this.goTo({ loc: "entrance", purpose: "exit" });
+      return this.goTo({ loc: "gate", purpose: "exit" });
     }
-    const hoodie = this.wish("hoodie");
-    if (t >= 21 * 60 && !hoodie.done && !hoodie.failed) return this.announce(hoodie, "shop");
+    const merch = this.wish("merch");
+    if (this.open(merch) && t >= 20 * 60 + 45) return this.announce(merch, "shop");
     const show = this.wish("show");
-    if (t >= 18 * 60 + 20 && t < 19 * 60 && !show.done && !show.failed) return this.announce(show, "show");
-    if (this.bladder >= 75) {
-      this.say(`Gary: "I gotta find a bathroom."`);
-      return this.goTo({ loc: "restroom", purpose: "restroom" });
+    if (this.open(show)) {
+      const travel = this.pathLen(show.def.loc) / GUEST_SPEED;
+      const st = show.def.showTime!;
+      if (t < st && t >= st - travel - 20) return this.announce(show, "show");
+    }
+    const bladderMax = this.trait("bladder") ? 60 : 75;
+    if (this.bladder >= bladderMax) {
+      const wc = this.nearest("restroom");
+      if (wc) {
+        this.say(`Gary: "I gotta find a bathroom."`);
+        return this.goTo({ loc: wc.id, purpose: "restroom" });
+      }
     }
     if (this.hunger >= 65) {
-      const vegan = this.wish("vegan");
-      if (!vegan.done && !vegan.failed) return this.announce(vegan, "food");
-      return this.goTo({ loc: "food", purpose: "food" });
+      const lunch = this.wish("lunch");
+      if (this.open(lunch) && lunch.retryAt <= t) return this.announce(lunch, "food");
+      const f = this.nearest("food");
+      if (f) return this.goTo({ loc: f.id, purpose: "food" });
     }
-    const w = this.nextWish();
-    if (w) return this.announce(w, "wish");
-    // Wishlist rides done (or given up on): go again on something, or rest.
-    const again = LOCS.filter((d) => d.kind === "ride" && d.id !== this.lastRide);
+    const rides = this.wishes.filter((w) => LOC[w.def.loc].kind === "ride" && this.open(w) && w.retryAt <= t);
+    if (rides.length) {
+      const best = rides.map((w) => ({ w, s: w.def.weight * 30 - this.pathLen(w.def.loc) }))
+        .sort((a, b) => b.s - a.s)[0].w;
+      return this.announce(best, "wish");
+    }
     if (this.rng() < 0.75) {
-      const d = again[Math.floor(this.rng() * again.length)];
-      this.thought = `${GUEST_NAMES[Math.floor(this.rng() * 2)]}: "${d.name} again?"`;
-      this.thoughtUntil = this.time + 10;
-      return this.goTo({ loc: d.id, purpose: "wish" });
+      const near = LOCS.filter((l) => l.kind === "ride" && l.id !== this.lastRide && !this.isClosed(l.id))
+        .map((l) => ({ l, d: this.pathLen(l.id) })).sort((a, b) => a.d - b.d).slice(0, 4);
+      if (near.length) {
+        const l = near[Math.floor(this.rng() * near.length)].l;
+        this.say(`${this.who()}: "${l.name}? Why not."`);
+        return this.goTo({ loc: l.id, purpose: "ride" });
+      }
     }
-    this.act = { t: "busy", loc: "hub", left: 30, what: "Sitting on a bench, judging people", done: () => this.joy(2, 3) };
+    this.g.act = { t: "busy", loc: null, left: 25, what: "Sitting on a bench, judging people", done: () => this.joy(2, 3) };
   }
 
   private announce(w: Wish, purpose: Purpose) {
-    if (!w.revealed) {
-      w.revealed = true;
+    if (this.heard()) {
+      if (!w.revealed) {
+        w.revealed = true;
+        this.pauses.push(`You overheard: ${w.def.label}`);
+      }
       this.say(`${w.def.who}: "${w.def.ask}"`);
-    } else {
-      this.thought = `${w.def.who}: "${w.def.label} next!"`;
-      this.thoughtUntil = this.time + 10;
     }
     this.goTo({ loc: w.def.loc, purpose, wish: w });
   }
@@ -376,112 +599,111 @@ export class Sim {
   private arrive(goal: Goal) {
     const l = this.locs[goal.loc];
     const w = goal.wish;
+    const yours = l.closedBy === "you";
     switch (goal.purpose) {
       case "gate":
         if (l.scannerBroken) return this.mimed();
-        this.act = { t: "busy", loc: "entrance", left: 5, what: "Getting tickets scanned" };
+        this.g.act = { t: "busy", loc: "gate", left: 5, what: "Getting tickets scanned" };
         return;
       case "exit":
-        this.act = { t: "gone" };
-        this.end(this.time >= CLOSE - 15 ? "closed" : "left");
+        this.g.act = { t: "gone" };
+        this.end(this.time >= CLOSE - 25 ? "closed" : "left");
         return;
-      case "wish": {
+      case "wish": case "ride": {
         if (this.isClosed(l.def.id)) {
-          const yours = l.closedBy === "you";
           this.hurt(12 * (w?.def.weight ?? REPEAT_WEIGHT), 10, "closed", yours);
-          this.say(`${this.who(w)}: "Closed?! It says it's closed."`, "bad");
+          this.say(`${this.who(w)}: "Closed?! We walked all the way here."`, "bad", true);
           if (w) this.failWish(w);
           return this.decide();
         }
         const wait = this.currentWait(l.def.id);
-        this.act = { t: "queue", loc: l.def.id, total: wait, left: wait, wish: w };
-        if (wait >= 60) this.say(`Gary: "${wait} minutes?! …Fine."`);
+        this.g.act = { t: "queue", loc: l.def.id, total: wait, left: wait, wish: w };
+        if (wait >= 50) this.say(`Gary: "${wait} minutes?! …Fine."`);
         return;
       }
       case "food":
-        if (this.isClosed("food")) {
-          this.hurt(8 + this.hunger / 10, 10, "fryer", l.closedBy === "you");
-          this.say(`Deb: "The FOOD COURT is closed? The whole thing?"`, "bad");
-          this.hunger = Math.min(this.hunger, 60); // they'll be back
-          if (w) w.retryAt = this.time + 45;
-          this.act = { t: "busy", loc: "hub", left: 20, what: "Eating a sad granola bar from the car" };
-          return;
+        if (this.isClosed(l.def.id)) {
+          this.hurt(8 + this.hunger / 10, 10, "fryer", yours);
+          this.say(`Deb: "Closed? I'm going to eat my own arm."`, "bad", true);
+          this.closedSeen[l.def.id] = l.closedUntil;
+          if (w) w.retryAt = this.time + 60;
+          return this.decide();
         }
-        this.act = {
-          t: "queue", loc: "food", total: 12, left: 12, wish: w,
-        };
+        this.g.act = { t: "queue", loc: l.def.id, total: 10, left: 10, wish: w };
         return;
       case "restroom":
-        if (this.isClosed("restroom")) {
-          this.hurt(8 + this.bladder / 8, 10, "restroom", l.closedBy === "you");
+        if (this.isClosed(l.def.id)) {
+          this.closedSeen[l.def.id] = l.closedUntil;
+          this.hurt(6 + this.bladder / 8, 8, "restroom", yours);
           if (this.bladder >= 95) {
-            this.say(`Gary: "I am going behind that dumpster. Don't look."`, "bad");
-            this.hurt(15, 15, "restroom");
+            this.say(`Gary: "I am going behind that dumpster. Don't look."`, "bad", true);
+            this.hurt(15, 15, "restroom", yours);
             this.bladder = 0;
-            return this.decide();
+          } else {
+            this.say(`Gary: "OUT OF ORDER?! Where's the next one?"`, "bad", true);
           }
-          this.say(`Gary: "OUT OF ORDER?! Both of them?"`, "bad");
-          this.act = { t: "busy", loc: "restroom", left: 15, what: "Doing the bathroom dance" };
-          return;
+          return this.decide();
         }
-        this.act = { t: "busy", loc: "restroom", left: 6, what: "In the restroom", done: () => { this.bladder = 0; } };
+        this.g.act = { t: "busy", loc: l.def.id, left: 5, what: "In the restroom", done: () => { this.bladder = 0; } };
         return;
       case "show": {
-        const wait = Math.max(0, 19 * 60 - this.time);
-        this.act = {
-          t: "busy", loc: "stage", left: wait, what: "Waiting for the Pumpkin Revue",
-          done: () => this.startShow(w!),
-        };
+        const st = w!.def.showTime!;
+        if (this.time > st) {
+          this.hurt(20 * w!.def.weight, 14, "lateShow");
+          this.say(`Deb: "It already STARTED? They won't let us in?!"`, "bad", true);
+          w!.failed = true;
+          return this.decide();
+        }
+        this.g.act = { t: "busy", loc: l.def.id, left: st - this.time, what: `Waiting for the ${l.def.showName}`, done: () => this.startShow(w!) };
         return;
       }
       case "shop":
         if (l.readerUntil > this.time) {
-          this.hurt(12, 6, "reader");
-          this.say(`Gary: "Cash only? Who carries cash?"`, "bad");
+          this.hurt(12 * w!.def.weight, 6, "reader");
+          this.say(`Gary: "Cash only? Who carries cash?"`, "bad", true);
           w!.failed = true;
           return this.decide();
         }
-        this.act = {
-          t: "busy", loc: "shop", left: 15, what: "Buying matching hoodies",
+        this.g.act = {
+          t: "busy", loc: l.def.id, left: 15, what: "Buying matching hoodies",
           done: () => { w!.done = true; this.joy(6, 6); this.say(`Deb: "We look SO cute."`, "good"); },
         };
         return;
-      case "rest":
-        return this.decide();
     }
   }
 
   private startShow(w: Wish) {
-    const l = this.locs.stage;
+    const l = this.locs[w.def.loc];
     if (l.showCancelled) {
       this.hurt(28 * w.def.weight, 18, "show");
-      this.say(`Deb: "Cancelled? We waited 40 minutes in the cold!"`, "bad");
+      this.say(`Deb: "Cancelled? We waited out here for nothing!"`, "bad", true);
       w.failed = true;
       return this.decide();
     }
-    this.act = {
-      t: "busy", loc: "stage", left: 40, what: "Watching the Pumpkin Revue",
-      done: () => { w.done = true; this.joy(10, 10); this.say(`Deb: "Pumpkin Pete is a NATIONAL TREASURE."`, "good"); },
+    this.g.act = {
+      t: "busy", loc: l.def.id, left: 40, what: `Watching the ${l.def.showName}`,
+      done: () => { w.done = true; this.joy(10, 10); this.say(`Deb: "That was a NATIONAL TREASURE."`, "good"); },
     };
   }
 
   private finishQueue(a: Extract<Act, { t: "queue" }>) {
-    if (a.loc === "food") {
-      const l = this.locs.food;
-      const deb = a.wish;
-      this.act = {
-        t: "busy", loc: "food", left: 20, what: "Eating at the Chow Barn",
+    const def = LOC[a.loc];
+    if (def.kind === "food") {
+      const l = this.locs[a.loc];
+      const lunch = a.wish;
+      this.g.act = {
+        t: "busy", loc: a.loc, left: 20, what: `Eating at ${def.name}`,
         done: () => {
           this.hunger = 0;
           this.bladder += 15;
-          if (deb && l.vegSwap) {
+          if (lunch && this.trait("vegan") && l.vegSwap) {
             l.vegSwap = false;
-            this.hurt(25 * deb.def.weight, 15, "veg");
-            this.say(`Deb: "Why does my vegan burger have a BONE in it?"`, "bad");
-            deb.failed = true;
-            deb.revealed = true;
-          } else if (deb) {
-            deb.done = true;
+            this.hurt(25 * lunch.def.weight, 15, "veg");
+            this.say(`Deb: "Why does my vegan burger have a BONE in it?"`, "bad", true);
+            lunch.failed = true;
+            lunch.revealed = true;
+          } else if (lunch) {
+            lunch.done = true;
             this.joy(5, 6);
             this.say(`Deb: "Huh. It's actually not bad."`, "good");
           } else {
@@ -492,14 +714,11 @@ export class Sim {
       };
       return;
     }
-    const def = this.locs[a.loc].def;
-    this.act = {
+    this.g.act = {
       t: "busy", loc: a.loc, left: def.rideMin ?? 5, what: `Riding ${def.name}`,
       done: () => {
         this.lastRide = a.loc;
-        if (a.wish) a.wish.done = true;
-        if (a.wish) this.joy(6, 8);
-        else this.joy(3, 4);
+        if (a.wish) { a.wish.done = true; this.joy(6, 8); } else this.joy(3, 4);
         this.say(`${this.who(a.wish)}: "WOOO! Again!"`, "good");
       },
     };
@@ -524,52 +743,68 @@ export class Sim {
   private tick(dt: number) {
     this.time += dt;
     this.hunger = Math.min(100, this.hunger + 0.12 * dt);
-    this.bladder = Math.min(100, this.bladder + 0.2 * dt);
+    this.bladder = Math.min(100, this.bladder + (this.trait("bladder") ? 0.26 : 0.2) * dt);
     this.suspicion = Math.max(0, this.suspicion - 0.05 * dt);
 
     for (const at of this.breakdowns) {
       if (at > this.time - dt && at <= this.time) {
         const rides = LOCS.filter((d) => d.kind === "ride" && !this.isClosed(d.id));
         const d = rides[Math.floor(this.rng() * rides.length)];
-        if (d) {
-          this.note(`${d.name} broke down all by itself. Classic. (Cover for you.)`, "park");
-          this.suspicion = Math.max(0, this.suspicion - 6);
-          this.closeLoc(d.id, this.time + 45, "park");
-        }
+        this.note(`${d.name} broke down all by itself. Classic. (Cover for you.)`, "park");
+        this.suspicion = Math.max(0, this.suspicion - 6);
+        this.closeLoc(d.id, this.time + 45, "park");
       }
     }
+    this.tickDuty();
 
     if (this.suspicion >= 100) {
       this.suspicion = 100;
       this.note("Management has reviewed the incident log. You're fired.", "bad");
       return this.end("fired");
     }
-    if (this.time >= CLOSE && this.act.t !== "gone") return this.end("closed");
+    if (this.time >= CLOSE) return this.end("closed");
 
-    const a = this.act;
+    this.tickGuests(dt);
+    this.tickWorker(dt);
+    if (this.patience <= 0 && !this.leaving && this.g.act.t !== "gone") this.decide();
+  }
+
+  private tickDuty() {
+    if (this.duty && this.time > this.duty.deadline) {
+      this.dutiesMissed++;
+      this.suspicion += 8;
+      this.note(`Manager: "I didn't see you at ${LOC[this.duty.loc].name}. I'll be making a note."`, "boss");
+      this.duty = null;
+      this.nextDutyAt = this.time + this.between(90, 130);
+    }
+    if (!this.duty && this.time >= this.nextDutyAt && this.time < CLOSE - 90) {
+      const opts = LOCS.filter((l) => l.kind !== "gate");
+      const l = opts[Math.floor(this.rng() * opts.length)];
+      const deadline = this.time + 75;
+      this.duty = { loc: l.id, deadline, text: dutyText(this.rng, l.name, fmtTime(deadline)) };
+      this.note(`Manager: "${this.duty.text}"`, "boss");
+      this.pauses.push(`New duty: ${l.name}`);
+    }
+  }
+
+  private tickGuests(dt: number) {
+    const g = this.g, a = g.act;
     switch (a.t) {
       case "walk": {
-        let move = WALK * dt;
-        while (move > 0 && a.path.length) {
-          const p = a.path[0];
-          const dx = p.i - this.pos.i, dy = p.j - this.pos.j, dist = Math.hypot(dx, dy);
-          if (dist <= move) {
-            this.pos = { ...p };
-            a.path.shift();
-            move -= dist;
-          } else {
-            this.pos = { i: this.pos.i + (dx / dist) * move, j: this.pos.j + (dy / dist) * move };
-            move = 0;
-          }
+        const blocked = this.blockedSet();
+        if (g.route.some((n, k) => k < g.route.length - 1 && blocked.has(n))) {
+          this.routeTo(g, LOC[a.goal.loc].node, blocked);
+          this.hurt(1, 1, "detour");
+          this.say(`Deb: "Wet floor? Again? We have to go AROUND."`, "bad", true);
         }
-        if (!a.path.length) this.arrive(a.goal);
+        this.patience -= 0.015 * dt;
+        if (this.move(g, GUEST_SPEED, dt)) this.arrive(a.goal);
         break;
       }
       case "queue": {
         a.left -= dt * (this.isSlow(a.loc) ? 0.5 : 1);
-        this.patience -= 0.045 * dt;
+        this.patience -= (this.trait("impatient") ? 0.065 : 0.045) * dt;
         if (this.isSlow(a.loc)) {
-          // Standing in a line you slowed down: quiet, steady, deniable misery.
           this.misery += 0.12 * dt;
           this.patience -= 0.04 * dt;
           this.slowSuffered = true;
@@ -581,11 +816,40 @@ export class Sim {
         a.left -= dt;
         if (a.left <= 0) {
           a.done?.();
-          if (this.act === a) this.decide();
+          if (this.g.act === a) this.decide();
         }
         break;
     }
-    if (this.patience <= 0 && !this.leaving && this.act.t !== "gone") this.decide();
+  }
+
+  private tickWorker(dt: number) {
+    const w = this.w;
+    if (w.task) {
+      w.task.left -= dt;
+      if (w.task.left <= 0) {
+        const t = w.task;
+        w.task = null;
+        this.finishTask(t);
+      }
+      return;
+    }
+    if (w.follow || w.pending?.target.kind === "guests") {
+      this.followTimer -= dt;
+      if (this.followTimer <= 0 || !w.route.length) {
+        this.followTimer = 2;
+        if (dist(w.pos, this.g.pos) > 1.5) this.routeTo(w, this.g.route[0] ?? this.g.prev);
+        else w.route = [];
+      }
+    }
+    this.move(w, this.workerSpeed(), dt);
+    const p = w.pending;
+    if (!p?.action) return;
+    if (p.target.kind === "guests" ? this.nearGuests() : !w.route.length) {
+      const why = this.cantDo(p.target, p.action);
+      w.pending = null;
+      if (why) this.note(`Couldn't do it: ${why}.`, "you");
+      else this.startTask(p.target, p.action);
+    }
   }
 
   // ------------------------------------------------------------- results
@@ -600,25 +864,31 @@ export class Sim {
     add("closedFront", "Waited forever for a ride and they closed it RIGHT as we got to the front.");
     add("closed", "Half the rides were “down for maintenance.”");
     add("veg", "I asked for the vegan option. It had a bone in it.");
-    add("fryer", "The food court had no food. A FOOD COURT.");
-    add("restroom", "Bathrooms out of order. My husband used a dumpster.");
-    add("show", "Drove 3 hours for the Pumpkin Revue. The pumpkin did not show.");
+    add("fryer", "We could not find food that was open. At a THEME PARK.");
+    add("restroom", "Every bathroom was out of order. My husband used a dumpster.");
+    add("show", "The show was cancelled after we waited around for it.");
+    add("lateShow", "Some employee kept us for a “survey” and we missed the show.");
+    add("survey", "A guy with a clipboard would not stop asking us questions.");
+    add("detour", "Wet Floor signs everywhere. It hasn't rained in weeks.");
     add("reader", "Gift shop was cash only. In this economy.");
     add("scanner", "Staff pretended to scan our tickets. Like, mimed it.");
     if (this.slowSuffered) lines.push("The lines did not move. I aged.");
     if (!lines.length) lines.push("Honestly? Kind of a nice day. Lines were long, I guess.");
-    const stars = Math.max(1, 5 - Math.floor(this.misery / 35));
+    const stars = Math.max(1, 5 - Math.floor(this.misery / 40));
     const done = this.wishes.filter((w) => w.done).length;
     const memo =
       why === "fired" ? "Your badge has been deactivated. Please return your vest. — Mgmt"
-        : score >= 150 ? "Guest satisfaction is at an all-time low. Promotion pending. — The New Owners"
-        : score >= 80 ? "Solid work. Per-guest spend is down, morale is down, we're thrilled. — The New Owners"
+        : score >= 200 ? "Guest satisfaction is at an all-time low. Promotion pending. — The New Owners"
+        : score >= 100 ? "Solid work. Per-guest spend is down, morale is down, we're thrilled. — The New Owners"
         : "They had FUN? We'll be discussing this at your review. — The New Owners";
-    return { why, mult, score, misery: Math.round(this.misery), stars, lines, done, memo };
+    return {
+      why, mult, score, misery: Math.round(this.misery), stars, lines, done, total: this.wishes.length, memo,
+      duties: `${this.dutiesDone} done, ${this.dutiesMissed} skipped`,
+    };
   }
 }
 
-function mulberry32(a: number) {
+export function mulberry32(a: number) {
   return () => {
     a |= 0; a = (a + 0x6d2b79f5) | 0;
     let t = Math.imul(a ^ (a >>> 15), 1 | a);

@@ -23,6 +23,8 @@
     </div>
   </div>
 
+  <div id="duty" class="panel hidden"></div>
+
   <div id="meters" class="panel">
     <div class="score"><span>Misery</span><b id="misery">0</b></div>
     <div class="meter"><span>Patience</span><i><b id="m-patience" style="--c: #3b3"></b></i></div>
@@ -32,19 +34,19 @@
   <div id="feed"></div>
   <div id="side" class="panel hidden"></div>
 
-  <div id="intro" class="overlay">
-    <div class="card">
-      <h1>Funtier Lands</h1>
-      <p class="tag">Fright Fest-ish season. Under new ownership. Again.</p>
-      <p>Management has one goal this quarter: guest satisfaction must go <b>down</b>. Today's target: <b>The Hendersons</b> (Deb &amp; Gary).</p>
-      <ul>
-        <li><b>Tap a building</b> to sabotage it. <b>Tap the Hendersons</b> to see what they want.</li>
-        <li><b>Misery</b> is your score. Keep them here until 10 PM for a <b>1.5×</b> bonus.</li>
-        <li>If <b>Patience</b> runs out, they go home early.</li>
-        <li>Make it look like incompetence. If <b>Suspicion</b> hits 100, you're fired.</li>
-      </ul>
-      <button id="start" class="big">Clock in</button>
+  <div id="belt">
+    <div id="me" class="chip"></div>
+    <div class="row">
+      <span id="tools"></span>
+      <button id="follow" class="round" title="Tail the Hendersons">👥</button>
+      <button id="findme" class="round" title="Find me">📍</button>
+      <button id="findthem" class="round" title="Find the Hendersons">🔍</button>
     </div>
+  </div>
+  <div id="toast"></div>
+
+  <div id="intro" class="overlay">
+    <div class="card" id="intro-card"></div>
   </div>
 
   <div id="results" class="overlay hidden"><div class="card" id="results-card"></div></div>
