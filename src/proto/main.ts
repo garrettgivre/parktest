@@ -87,6 +87,7 @@ class Park extends Phaser.Scene {
   trainPhase = 0;
   night!: Phaser.GameObjects.Rectangle;
   swans: { img: Phaser.GameObjects.Image; f: number; phase: number; speed: number }[] = [];
+  clouds: Phaser.GameObjects.Image[] = [];
   wheels: { wg: Phaser.GameObjects.Graphics; cars: Phaser.GameObjects.Rectangle[]; cx: number; cy: number; r: number }[] = [];
   drops: { img: Phaser.GameObjects.Image; i: number; j: number; top: number; t: number }[] = [];
   glows: Phaser.GameObjects.Image[] = [];
@@ -181,6 +182,11 @@ class Park extends Phaser.Scene {
       g.generateTexture("dropring", 96, 32);
       g.destroy();
     }
+    // Cloud shadows drifting over the park (the "glow" texture, darkened).
+    const lo2 = uv(-95, -45), hi2 = uv(95, LOT_V + 22);
+    this.clouds = [0, 1, 2, 3, 4].map((k) =>
+      this.add.image(lo2.x + ((hi2.x - lo2.x) * k) / 5, lo2.y + ((hi2.y - lo2.y) * ((k * 37) % 10)) / 10, "glow")
+        .setTint(0x000000).setAlpha(0.16).setScale(14 + k * 3, 6 + k).setDepth(5400));
     for (const l of LOCS) {
       if (l.id !== "glitter" && l.id !== "meteor") continue;
       const img = this.add.image(0, 0, "dropring").setDepth(l.i + l.j + 0.7);
@@ -1440,6 +1446,15 @@ class Park extends Phaser.Scene {
       const z = d.t < 6 ? 0.4 + (d.top - 0.4) * (d.t / 6) : d.t < 7.5 ? d.top : d.t < 8 ? d.top - (d.top - 0.4) * ((d.t - 7.5) / 0.5) ** 2 : 0.4;
       const p = iso(d.i, d.j, z);
       d.img.setPosition(p.x, p.y);
+    }
+    {
+      const lo2 = uv(-95, -45), hi2 = uv(95, LOT_V + 22);
+      for (const c of this.clouds) {
+        c.x += dtMs * 0.06;
+        c.y += dtMs * 0.012;
+        if (c.x > hi2.x + 1200) { c.x = lo2.x - 1200; }
+        if (c.y > hi2.y + 600) { c.y = lo2.y - 600; }
+      }
     }
     for (const sw of this.swans) {
       sw.phase += (dtMs / 1000) * sw.speed;
