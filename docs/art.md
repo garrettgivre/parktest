@@ -23,6 +23,10 @@ npm run people               # render the character sprite sheets
   and roof style, the **kind** picks the shape (food counter, ride station, restroom,
   show marquee...). A few things have their own models (spinners, drop towers, the
   T-Rex, landmarks, cars).
+- **Rides** each have their own model in the ride kit (`RIDES` in `build_park.py`): a carousel
+  with horses, a teapot in the teacups, a lattice drop tower, the T-Rex, a gambrel-roofed Scare
+  Barn and so on. Flat rides leave their vehicles out; the game spins those on top (teacups,
+  pods, bubbles, chain swings, tilt cars).
 - **Camera:** orthographic, 60° tilt, 45° turn (2:1 dimetric), **128 px per tile**, 78 px
   per tile of height. This matches the game exactly, so sprites drop straight in.
 - **Lighting:** one warm sun from the upper left, soft sky light, shadow catcher on the

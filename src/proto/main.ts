@@ -95,7 +95,10 @@ class Park extends Phaser.Scene {
   swans: { img: Phaser.GameObjects.Image; f: number; phase: number; speed: number }[] = [];
   clouds: Phaser.GameObjects.Image[] = [];
   fog: { img: Phaser.GameObjects.Image; x: number; y: number; k: number }[] = [];
-  spinners: { id: string; cars: Phaser.GameObjects.Ellipse[]; i: number; j: number; r: number; z: number; a: number; speed: number }[] = [];
+  spinners: {
+    id: string; cars: Phaser.GameObjects.Image[]; i: number; j: number; r: number; z: number; a: number; speed: number;
+    tether?: { g: Phaser.GameObjects.Graphics; r: number; z: number };
+  }[] = [];
   wheels: { wg: Phaser.GameObjects.Graphics; cars: Phaser.GameObjects.Rectangle[]; cx: number; cy: number; r: number }[] = [];
   drops: { img: Phaser.GameObjects.Image; i: number; j: number; top: number; t: number }[] = [];
   glows: Phaser.GameObjects.Image[] = [];
@@ -191,15 +194,22 @@ class Park extends Phaser.Scene {
       g.generateTexture("dropring", 96, 32);
       g.destroy();
     }
-    // Flat rides: cars circling while the ride runs.
+    this.bakeRideCars();
+    // Flat rides: their vehicles circling while the ride runs (the carousel's horses are in its model).
     this.spinners = [];
-    const SPIN: Record<string, [number, number]> = { carousel: [0.3, 0.6], teacups: [0.18, 1.1], satellite: [1.0, 1.4], swings: [1.0, 1.5], inferno: [0.4, 1.8], bubble: [0.8, 1.0], flipphone: [1.0, 1.2] };
+    // id: [height, speed, vehicle, tether from (radius, height) for rides that hang off chains]
+    const SPIN: Record<string, [number, number, string, [number, number]?]> = {
+      teacups: [0.18, 1.1, "cup"], satellite: [1.05, 1.4, "pod"], swings: [1.0, 1.5, "seat", [0.85, 1.72]],
+      inferno: [0.4, 1.8, "tilt"], bubble: [0.88, 1.0, "bubble"], flipphone: [0.95, 1.2, "seat", [0.42, 1.15]],
+    };
     for (const l of LOCS) {
       const sp = SPIN[l.id];
       if (!sp) continue;
-      const cols = [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xff66cc, 0xffffff];
-      const cars = cols.map((c) => this.add.ellipse(0, 0, 22, 14, c).setStrokeStyle(2, 0x000000, 0.5).setDepth(l.i + l.j + 0.6));
-      this.spinners.push({ id: l.id, cars, i: l.i, j: l.j, r: Math.min(l.w, l.d) * 0.42, z: sp[0], a: 0, speed: sp[1] });
+      const cols = sp[2] === "bubble" ? [0xbfe9ff, 0xd8f3ff, 0xbfe9ff, 0xd8f3ff, 0xbfe9ff, 0xd8f3ff] : [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71, 0xff66cc, 0xffffff];
+      const cars = cols.map((c) => this.add.image(0, 0, "car_" + sp[2]).setTint(c).setOrigin(0.5, sp[2] === "seat" ? 0.2 : 0.75).setDepth(l.i + l.j + 0.6));
+      const r = Math.min(l.w, l.d) * 0.42;
+      const tether = sp[3] ? { g: this.add.graphics().setDepth(l.i + l.j + 0.58), r: sp[3][0] * (Math.min(l.w, l.d) / 2), z: sp[3][1] } : undefined;
+      this.spinners.push({ id: l.id, cars, i: l.i, j: l.j, r, z: sp[0], a: 0, speed: sp[1], tether });
     }
     // Fountain Circle's fountain doesn't work. Well, it dribbles. Occasionally.
     const ft = LANDMARKS.find((m) => m.icon === "⛲");
@@ -393,59 +403,32 @@ class Park extends Phaser.Scene {
     const circle = (gr: Phaser.GameObjects.Graphics, i: number, j: number, r: number, color: number, alpha = 1) =>
       gr.fillStyle(color, alpha).fillEllipse(iso(i, j).x, iso(i, j).y, r * 2 * HALF * Math.SQRT2, r * HALF * Math.SQRT2);
 
-    // Plazas: Fountain Circle, and an entrance plaza where each land meets the promenade.
-    const plaza = this.add.graphics().setDepth(-92);
-    const hub = NODES.hub;
-    circle(plaza, hub.i, hub.j, 5.2, 0x8d7b60);
-    circle(plaza, hub.i, hub.j, 4.8, 0xd9ccb4);
-    for (const id of RING_IDS) if (ZONES[id].kind === "land") circle(plaza, NODES[id].i, NODES[id].j, 2.6, 0xd9ccb4);
+    // Walkways, plazas and bridges: textured pavers painted straight into the ground layer.
+    this.paintPaths();
 
-    // Paths by mode: walkways, the footbridge, train rails.
+    // Train rails on a gravel bed with real ties; staff service roads as gravel lanes.
     const paths = this.add.graphics().setDepth(-90);
-    const isBridge = (a2: string, b2: string) => BRIDGES.some(([x, y]) => (x === a2 && y === b2) || (x === b2 && y === a2));
     for (const e of EDGES) {
+      if (e.mode !== "train") continue;
       const pa = pt(e.a), pb = pt(e.b);
-      if (e.mode === "train") {
-        paths.lineStyle(26, 0x6e4b2a, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
-        paths.lineStyle(6, 0xb3b6b7, 1).lineBetween(pa.x, pa.y - 7, pb.x, pb.y - 7).lineBetween(pa.x, pa.y + 7, pb.x, pb.y + 7);
-      } else if (e.mode === "foot") {
-        if (isBridge(e.a, e.b)) paths.lineStyle(80, 0x6e4b2a, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
-        else paths.lineStyle(76, 0x8d7f6a, 1).lineBetween(pa.x, pa.y, pb.x, pb.y); // curb
-        paths.lineStyle(isBridge(e.a, e.b) ? 60 : 64, 0xd9ccb4, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
+      const len = Phaser.Math.Distance.Between(pa.x, pa.y, pb.x, pb.y) || 1;
+      const nx = -(pb.y - pa.y) / len, ny = (pb.x - pa.x) / len;
+      paths.lineStyle(40, 0x7a7064, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
+      paths.lineStyle(30, 0x8f8576, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
+      for (let d = 0; d < len; d += 16) {
+        const x = pa.x + ((pb.x - pa.x) * d) / len, y = pa.y + ((pb.y - pa.y) * d) / len;
+        paths.lineStyle(6, 0x5a3d25, 1).lineBetween(x - nx * 17, y - ny * 17, x + nx * 17, y + ny * 17);
       }
-    }
-    for (const l of LOCS) {
-      const n = NODES[l.node], door = this.doorPoint(l);
-      const pa = iso(n.i, n.j), pb = iso(door.i, door.j);
-      paths.lineStyle(30, 0xd9ccb4, 1).lineBetween(pa.x, pa.y, pb.x, pb.y);
+      for (const o of [-8, 8]) {
+        paths.lineStyle(5, 0x6b7075, 1).lineBetween(pa.x + nx * o, pa.y + ny * o, pb.x + nx * o, pb.y + ny * o);
+        paths.lineStyle(2, 0xd0d4d8, 1).lineBetween(pa.x + nx * o, pa.y + ny * o - 1, pb.x + nx * o, pb.y + ny * o - 1);
+      }
     }
     for (const [a2, b2] of SERVICE) {
       const pa = pt(a2), pb = pt(b2);
-      const len = Phaser.Math.Distance.Between(pa.x, pa.y, pb.x, pb.y), n = Math.floor(len / 70);
-      for (let k = 0; k < n; k += 2) {
-        const t0 = k / n, t1 = (k + 1) / n;
-        paths.lineStyle(14, 0x5d4e37, 0.75).lineBetween(
-          pa.x + (pb.x - pa.x) * t0, pa.y + (pb.y - pa.y) * t0, pa.x + (pb.x - pa.x) * t1, pa.y + (pb.y - pa.y) * t1);
-      }
+      paths.lineStyle(26, 0x7d705c, 0.55).lineBetween(pa.x, pa.y, pb.x, pb.y);
+      paths.lineStyle(16, 0x9a8c74, 0.5).lineBetween(pa.x, pa.y, pb.x, pb.y);
     }
-    for (const n of Object.values(NODES)) {
-      if (/^t\d+$/.test(n.id)) continue;
-      const q = iso(n.i, n.j);
-      paths.fillStyle(0xd9ccb4, 1).fillEllipse(q.x, q.y, 120, 60);
-    }
-    // Paver seams: short darker ticks across every walkway.
-    for (const e of EDGES) {
-      if (e.mode !== "foot" || isBridge(e.a, e.b)) continue;
-      const pa = pt(e.a), pb = pt(e.b);
-      const len = Phaser.Math.Distance.Between(pa.x, pa.y, pb.x, pb.y);
-      const nx = -(pb.y - pa.y) / len, ny = (pb.x - pa.x) / len;
-      for (let d = 40; d < len - 40; d += 46) {
-        const x = pa.x + ((pb.x - pa.x) * d) / len, y = pa.y + ((pb.y - pa.y) * d) / len;
-        paths.lineStyle(4, 0xb8a98f, 0.8).lineBetween(x - nx * 26, y - ny * 26, x + nx * 26, y + ny * 26);
-      }
-    }
-
-    this.bakeIntoGround(plaza);
     this.bakeIntoGround(paths);
     this.drawTrees();
 
@@ -625,6 +608,129 @@ class Park extends Phaser.Scene {
     this.textures.remove("groundSurf");
   }
 
+  /** Paver walkways with a worn edge, a curb and grime, plus plazas and plank bridges, stamped into the ground. */
+  paintPaths() {
+    const { rt, lo, S } = this.ground;
+    const cv = this.textures.createCanvas("pathSurf", rt.width, rt.height)!;
+    const ctx = cv.getContext();
+    const P = (x: number, y: number) => [(x - lo.x) * S, (y - lo.y) * S] as const;
+    const at = (i: number, j: number) => P((i - j) * HALF, (i + j) * (HALF / 2));
+    const nodeXY = (id: string) => at(NODES[id].i, NODES[id].j);
+    const hash = (n: number) => { const x = Math.sin(n * 91.7) * 43758.5453; return x - Math.floor(x); };
+    // A paver cell laid on the iso grid: it covers 2x2 ground tiles, 4x4 slabs in running bond
+    // (big enough to survive the quarter-resolution ground layer).
+    const T = 128, cell = document.createElement("canvas");
+    cell.width = cell.height = T;
+    const cx = cell.getContext("2d")!;
+    cx.fillStyle = "#a8977c";
+    cx.fillRect(0, 0, T, T);
+    const n = 4, q = T / n;
+    for (let r = 0; r < n; r++) {
+      for (let c = -1; c < n; c++) {
+        const x = c * q + (r % 2 ? q / 2 : 0), v = hash(r * 31 + c * 7 + 3);
+        const tone = 205 + Math.round((v - 0.5) * 26);
+        cx.fillStyle = `rgb(${tone + 14},${tone + 4},${tone - 18})`;
+        cx.fillRect(x + 2.5, r * q + 2.5, q - 5, q - 5);
+        if (v > 0.8) { cx.fillStyle = "rgba(90,70,50,0.22)"; cx.fillRect(x + 6, r * q + 8, q * 0.5, q * 0.4); } // a stain
+      }
+    }
+    const pavers = ctx.createPattern(cell, "repeat")!;
+    {
+      const k = (2 / T) * S; // pattern px -> tiles -> screen -> ground canvas
+      pavers.setTransform(new DOMMatrix([HALF * k, (HALF / 2) * k, -HALF * k, (HALF / 2) * k, -lo.x * S, -lo.y * S]));
+    }
+    let wood: CanvasPattern | null = null;
+    if (this.textures.exists("gnd_wood")) {
+      wood = ctx.createPattern(this.textures.get("gnd_wood").getSourceImage() as HTMLImageElement, "repeat")!;
+      wood.setTransform(new DOMMatrix().translate(-lo.x * S, -lo.y * S).scale(S));
+    }
+    const isBridge = (a2: string, b2: string) => BRIDGES.some(([x, y]) => (x === a2 && y === b2) || (x === b2 && y === a2));
+    const walk = new Path2D(), spur = new Path2D(), bridge = new Path2D();
+    for (const e of EDGES) {
+      if (e.mode !== "foot") continue;
+      const tgt = isBridge(e.a, e.b) ? bridge : walk;
+      tgt.moveTo(...nodeXY(e.a));
+      tgt.lineTo(...nodeXY(e.b));
+    }
+    for (const l of LOCS) {
+      const door = this.doorPoint(l);
+      spur.moveTo(...nodeXY(l.node));
+      spur.lineTo(...at(door.i, door.j));
+    }
+    // Plazas: iso circles (radius in tiles) are axis-aligned ellipses on screen.
+    const plazas: [number, number, number][] = [[NODES.hub.i, NODES.hub.j, 4.8]];
+    for (const id of RING_IDS) if (ZONES[id].kind === "land") plazas.push([NODES[id].i, NODES[id].j, 2.6]);
+    for (const nd of Object.values(NODES)) {
+      if (/^t\d+$/.test(nd.id) || plazas.some(([i, j]) => i === nd.i && j === nd.j)) continue;
+      plazas.push([nd.i, nd.j, 0.5]); // a little roundabout at every junction
+    }
+    const plaza = (grow: number) => {
+      const p = new Path2D();
+      for (const [i, j, r] of plazas) {
+        const [x, y] = at(i, j);
+        const rx = (r * HALF * Math.SQRT2 + grow) * S;
+        p.moveTo(x + rx, y);
+        p.ellipse(x, y, rx, rx / 2, 0, 0, Math.PI * 2);
+      }
+      return p;
+    };
+    ctx.lineCap = ctx.lineJoin = "round";
+    const layer = (style: string | CanvasPattern, wWalk: number, wSpur: number, grow: number) => {
+      ctx.strokeStyle = ctx.fillStyle = style;
+      ctx.lineWidth = wWalk * S;
+      ctx.stroke(walk);
+      ctx.lineWidth = wSpur * S;
+      ctx.stroke(spur);
+      ctx.fill(plaza(grow));
+    };
+    layer("rgba(70,55,35,0.22)", 100, 52, 18); // trampled grass along the edges
+    layer("#857660", 80, 40, 8); // curb
+    layer("#c4b597", 74, 36, 5); // curb top
+    layer(pavers, 64, 30, 0);
+    // Wear: a polished stripe down the middle where everybody walks, and the odd gum blot.
+    ctx.lineWidth = 24 * S;
+    ctx.strokeStyle = "rgba(255,248,230,0.12)";
+    ctx.stroke(walk);
+    for (const e of EDGES) {
+      if (e.mode !== "foot" || isBridge(e.a, e.b)) continue;
+      const [ax, ay] = nodeXY(e.a), [bx, by] = nodeXY(e.b);
+      const m = Math.floor(Math.hypot(bx - ax, by - ay) / (40 * S));
+      for (let k = 0; k < m; k++) {
+        const h = hash(ax * 0.13 + k * 1.7 + by);
+        if (h > 0.3) continue;
+        const t = (k + 0.5) / m, o = (hash(h * 77) - 0.5) * 36 * S;
+        const gum = h < 0.08;
+        ctx.fillStyle = gum ? "rgba(40,30,25,0.35)" : "rgba(110,90,60,0.18)";
+        ctx.beginPath();
+        ctx.ellipse(ax + (bx - ax) * t + o, ay + (by - ay) * t + o * 0.5, (gum ? 4 : 9) * S, (gum ? 2 : 4.5) * S, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    // Fountain Circle: rings of red pavers around the (broken) fountain.
+    {
+      const [x, y] = nodeXY("hub");
+      for (const [r, w] of [[1.9, 10], [3.0, 14], [4.25, 10]] as const) {
+        const rx = r * HALF * Math.SQRT2 * S;
+        ctx.lineWidth = w * S;
+        ctx.strokeStyle = "rgba(150,80,55,0.45)";
+        ctx.beginPath();
+        ctx.ellipse(x, y, rx, rx / 2, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    }
+    // Footbridges: planks between dark rails.
+    ctx.lineCap = "butt";
+    ctx.lineWidth = 84 * S;
+    ctx.strokeStyle = "#3d2a1a";
+    ctx.stroke(bridge);
+    ctx.lineWidth = 66 * S;
+    ctx.strokeStyle = wood ?? "#8a6440";
+    ctx.stroke(bridge);
+    cv.refresh();
+    rt.stamp("pathSurf", undefined, 0, 0, { originX: 0, originY: 0 });
+    this.textures.remove("pathSurf");
+  }
+
   /** Trees fill every gap that isn't a path, a building or water, plus a berm around the edge. */
   drawTrees() {
     const segs: [number, number, number, number][] = [];
@@ -731,7 +837,8 @@ class Park extends Phaser.Scene {
   }
 
   ferrisWheel(l: LocDef) {
-    const base = iso(l.i, l.j, l.h), c = iso(l.i, l.j, l.h + 1.9);
+    const r0 = 150 / ZPX; // wheel radius in height units: the rim clears the loading deck
+    const base = iso(l.i, l.j + 0.15, 0.6), c = iso(l.i, l.j + 0.15, 0.55 + r0);
     const g = this.add.graphics().setDepth(l.i + l.j + 0.6);
     const r = 150;
     this.cullables.push({ obj: g, x0: c.x - r - 30, y0: c.y - r - 30, x1: c.x + r + 30, y1: base.y + 10 });
@@ -746,6 +853,47 @@ class Park extends Phaser.Scene {
     const cars = Array.from({ length: 12 }, (_, k) =>
       this.add.rectangle(0, 0, 28, 24, [0xe74c3c, 0x3498db, 0xf1c40f, 0x2ecc71][k % 4]).setOrigin(0.5, 0).setDepth(l.i + l.j + 0.65));
     this.wheels.push({ wg, cars, cx: c.x, cy: c.y, r });
+  }
+
+  /** Ride vehicles, drawn in white and grays so each car can be tinted its own colour. */
+  bakeRideCars() {
+    if (this.textures.exists("car_cup")) return;
+    const make = (key: string, w: number, h: number, draw: (g: Phaser.GameObjects.Graphics) => void) => {
+      const g = this.make.graphics({}, false);
+      draw(g);
+      g.generateTexture(key, w, h);
+      g.destroy();
+    };
+    make("car_cup", 40, 34, (g) => {
+      g.fillStyle(0x000000, 0.25).fillEllipse(20, 28, 38, 12);
+      g.fillStyle(0xdddddd, 1).fillEllipse(20, 26, 36, 12); // saucer
+      g.fillStyle(0xffffff, 1).fillRoundedRect(7, 8, 26, 18, 8); // cup
+      g.fillStyle(0xbbbbbb, 1).fillEllipse(20, 9, 26, 9); // rim
+      g.fillStyle(0x555555, 1).fillEllipse(20, 9, 20, 6); // inside
+      g.lineStyle(4, 0xffffff, 1).strokeCircle(35, 16, 5); // handle
+    });
+    make("car_pod", 34, 26, (g) => {
+      g.fillStyle(0xffffff, 1).fillEllipse(17, 14, 32, 18);
+      g.fillStyle(0x223344, 1).fillEllipse(13, 11, 12, 8);
+      g.fillStyle(0xcccccc, 1).fillTriangle(30, 8, 34, 4, 34, 18);
+    });
+    make("car_bubble", 30, 30, (g) => {
+      g.fillStyle(0xffffff, 0.55).fillCircle(15, 15, 14);
+      g.lineStyle(2, 0xffffff, 0.9).strokeCircle(15, 15, 14);
+      g.fillStyle(0xffffff, 0.95).fillCircle(10, 9, 4);
+      g.fillStyle(0x333333, 0.6).fillCircle(15, 19, 5); // a rider, visibly regretting it
+    });
+    make("car_seat", 18, 20, (g) => {
+      g.fillStyle(0xf0c8a0, 1).fillCircle(9, 5, 4); // rider
+      g.fillStyle(0xffffff, 1).fillRect(3, 9, 12, 7);
+      g.fillStyle(0x888888, 1).fillRect(3, 15, 12, 3);
+    });
+    make("car_tilt", 40, 28, (g) => {
+      g.fillStyle(0x000000, 0.25).fillEllipse(20, 22, 38, 12);
+      g.fillStyle(0xffffff, 1).fillEllipse(20, 16, 38, 20); // shell
+      g.fillStyle(0x444444, 1).fillEllipse(17, 12, 24, 10); // seat well
+      g.fillStyle(0xffffff, 1).fillRect(28, 4, 8, 12); // high back
+    });
   }
 
   doorPoint(l: LocDef) {
@@ -1519,10 +1667,18 @@ class Park extends Phaser.Scene {
     }
     for (const sp of this.spinners) {
       if (!this.sim.isClosed(sp.id)) sp.a += (dtMs / 1000) * sp.speed;
+      const tg = sp.tether && this.inView(sp.cars[0].x, sp.cars[0].y) ? sp.tether : undefined;
+      tg?.g.clear().lineStyle(2, 0x2c3e50, 0.7);
       sp.cars.forEach((car, k) => {
         const t = sp.a + (k / sp.cars.length) * Math.PI * 2;
-        const p = iso(sp.i + Math.cos(t) * sp.r, sp.j + Math.sin(t) * sp.r, sp.z);
+        // Chain rides fling their seats outward as they go.
+        const fling = sp.tether ? 1 + 0.15 * Math.min(1, sp.speed) : 1;
+        const p = iso(sp.i + Math.cos(t) * sp.r * fling, sp.j + Math.sin(t) * sp.r * fling, sp.z);
         car.setPosition(p.x, p.y).setDepth(sp.i + sp.j + (Math.sin(t) + Math.cos(t) > 0 ? 0.6 : -0.1)); // behind the hub on the far side
+        if (tg) {
+          const q = iso(sp.i + Math.cos(t) * tg.r, sp.j + Math.sin(t) * tg.r, tg.z);
+          tg.g.lineBetween(q.x, q.y, p.x, p.y);
+        }
       });
     }
     for (const d of this.drops) {
