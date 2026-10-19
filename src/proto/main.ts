@@ -99,6 +99,7 @@ class Park extends Phaser.Scene {
     id: string; cars: Phaser.GameObjects.Image[]; i: number; j: number; r: number; z: number; a: number; speed: number;
     tether?: { g: Phaser.GameObjects.Graphics; r: number; z: number };
   }[] = [];
+  coasters: { id: string; pts: { x: number; y: number; z: number }[]; cars: Phaser.GameObjects.Image[]; s: number }[] = [];
   wheels: { wg: Phaser.GameObjects.Graphics; cars: Phaser.GameObjects.Rectangle[]; cx: number; cy: number; r: number }[] = [];
   drops: { img: Phaser.GameObjects.Image; i: number; j: number; top: number; t: number }[] = [];
   glows: Phaser.GameObjects.Image[] = [];
@@ -171,6 +172,7 @@ class Park extends Phaser.Scene {
     this.pins = {};
     this.cullables = [];
     this.wheels = [];
+    this.coasters = [];
     this.drops = [];
     this.landLabels = [];
     this.cameras.main.setBackgroundColor("#2c4a2e");
@@ -537,6 +539,7 @@ class Park extends Phaser.Scene {
     this.ground = { rt, lo, S };
     gg.destroy();
     this.paintSurfaces(lo, W, H, S);
+    this.paintLawn(lo, S);
   }
 
   /** Surface (texture + colour wash) for a ground point, or null to keep the painted colour. */
@@ -607,6 +610,103 @@ class Park extends Phaser.Scene {
     this.ground.rt.stamp("groundSurf", undefined, 0, 0, { originX: 0, originY: 0 });
     this.textures.remove("groundSurf");
   }
+
+  /** Lawns get mowing stripes, tufts and clover; beaches get grains. Painted over the flat ground colour. */
+  paintLawn(lo: { x: number; y: number }, S: number) {
+    const { rt } = this.ground;
+    const noise = (x: number, y: number) => 0.5 * Math.sin(x * 1.7 + Math.sin(y * 1.3)) + 0.5 * Math.sin(y * 2.1 + Math.sin(x * 0.9));
+    const kind = (u: number, v: number): "lawn" | "sand" | null => {
+      if (Math.abs(u) < 11 && v > DEPOT_V - 2 && v < GATE_V + 4) return null;
+      if (v >= GATE_V + 4) return null;
+      const du = u - CENTER.u, dv = v - CENTER.v, r = Math.hypot(du, dv);
+      const deg = (Math.atan2(dv, du) * 180) / Math.PI, n = noise(u * 0.12, v * 0.12);
+      if (r < 3.2 + n * 0.6) return "sand";
+      const L = lagoonR(deg);
+      if (r < L - 0.8) return null;
+      if (r < L + 0.9) return "sand";
+      if (r > shapeR(deg) * 2.0 + n * 3) return null;
+      return this.surfaceAt(u, v) ? null : "lawn";
+    };
+    const lawn = new Path2D(), sand = new Path2D();
+    const P = (i: number, j: number) => { const p = iso(i, j); return [(p.x - lo.x) * S, (p.y - lo.y) * S] as const; };
+    for (let i = Math.floor((-95 - 45) / 2); i <= Math.ceil((95 + LOT_V + 22) / 2); i++) {
+      for (let j = Math.floor((-45 - 95) / 2); j <= Math.ceil((LOT_V + 22 + 95) / 2); j++) {
+        const k = kind(i - j, i + j + 1);
+        if (!k) continue;
+        const tgt = k === "lawn" ? lawn : sand;
+        tgt.moveTo(...P(i - 0.02, j - 0.02));
+        tgt.lineTo(...P(i + 1.02, j - 0.02));
+        tgt.lineTo(...P(i + 1.02, j + 1.02));
+        tgt.lineTo(...P(i - 0.02, j + 1.02));
+        tgt.closePath();
+      }
+    }
+    const cv = this.textures.createCanvas("lawnSurf", rt.width, rt.height)!;
+    const ctx = cv.getContext();
+    const hash = (n: number) => { const x = Math.sin(n * 91.7) * 43758.5453; return x - Math.floor(x); };
+    // Mowing stripes: alternate rows of tiles a touch lighter, laid along the iso grid.
+    const stripe = document.createElement("canvas");
+    stripe.width = stripe.height = 64;
+    const sx = stripe.getContext("2d")!;
+    sx.fillStyle = "rgba(255,255,230,0.07)";
+    sx.fillRect(0, 0, 64, 32);
+    sx.fillStyle = "rgba(0,30,0,0.04)";
+    sx.fillRect(0, 32, 64, 32);
+    const sp = ctx.createPattern(stripe, "repeat")!;
+    const k2 = (3 / 64) * S; // one stripe pair spans 3 tiles
+    sp.setTransform(new DOMMatrix([HALF * k2, (HALF / 2) * k2, -HALF * k2, (HALF / 2) * k2, -lo.x * S, -lo.y * S]));
+    // Detail in screen space: tufts, darker clumps, the odd clover patch and dandelion.
+    const det = (draw: (c: CanvasRenderingContext2D, T: number) => void) => {
+      const T = 96, d = document.createElement("canvas");
+      d.width = d.height = T;
+      draw(d.getContext("2d")!, T);
+      return ctx.createPattern(d, "repeat")!;
+    };
+    const tufts = det((c, T) => {
+      for (let k = 0; k < 260; k++) {
+        const x = hash(k * 3.1) * T, y = hash(k * 7.7) * T, v = hash(k * 1.3);
+        c.fillStyle = v < 0.55 ? "rgba(20,50,10,0.16)" : v < 0.9 ? "rgba(255,255,200,0.13)" : "rgba(255,255,255,0.35)";
+        c.fillRect(x, y, 1, v < 0.55 ? 2 : 1);
+      }
+      for (let k = 0; k < 6; k++) { // clumps and clover
+        const x = hash(k * 11.3) * T, y = hash(k * 5.9) * T;
+        c.fillStyle = k % 3 ? "rgba(20,60,10,0.12)" : "rgba(120,200,90,0.16)";
+        c.beginPath();
+        c.ellipse(x, y, 5 + hash(k) * 4, 2.5 + hash(k) * 2, 0, 0, Math.PI * 2);
+        c.fill();
+      }
+      c.fillStyle = "rgba(255,230,60,0.7)"; // dandelion
+      c.fillRect(hash(9.1) * T, hash(4.4) * T, 1.5, 1.5);
+    });
+    const grains = det((c, T) => {
+      for (let k = 0; k < 220; k++) {
+        const v = hash(k * 2.3);
+        c.fillStyle = v < 0.5 ? "rgba(120,90,40,0.18)" : "rgba(255,255,240,0.3)";
+        c.fillRect(hash(k * 3.7) * T, hash(k * 9.1) * T, 1, 1);
+      }
+    });
+    ctx.save();
+    ctx.clip(lawn);
+    // Big soft patches of lighter and darker turf break up the flat colour.
+    for (let k = 0; k < 900; k++) {
+      const x = hash(k * 1.91) * rt.width, y = hash(k * 4.37) * rt.height, r = 10 + hash(k * 2.2) * 26;
+      ctx.fillStyle = k % 2 ? "rgba(30,60,10,0.05)" : "rgba(255,255,200,0.045)";
+      ctx.beginPath();
+      ctx.ellipse(x, y, r * 2, r, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = sp;
+    ctx.fill(lawn);
+    ctx.fillStyle = tufts;
+    ctx.fill(lawn);
+    ctx.restore();
+    ctx.fillStyle = grains;
+    ctx.fill(sand);
+    cv.refresh();
+    rt.stamp("lawnSurf", undefined, 0, 0, { originX: 0, originY: 0 });
+    this.textures.remove("lawnSurf");
+  }
+
 
   /** Paver walkways with a worn edge, a curb and grime, plus plazas and plank bridges, stamped into the ground. */
   paintPaths() {
@@ -816,24 +916,53 @@ class Park extends Phaser.Scene {
     const ang = Math.atan2(out.j, out.i);
     const g = this.add.graphics().setDepth(cx + cy + 1);
     const pts: { x: number; y: number; gx: number; gy: number }[] = [];
+    const zs: number[] = [];
     for (let k = 0; k <= 64; k++) {
       const t = (k / 64) * Math.PI * 2;
       const a1 = rx * Math.cos(t) * (1 + 0.25 * Math.sin(3 * t)), b1 = ry * Math.sin(2 * t) * 0.9 + ry * 0.5 * Math.sin(t);
       const i = cx + a1 * Math.cos(ang) - b1 * Math.sin(ang), j = cy + a1 * Math.sin(ang) + b1 * Math.cos(ang);
       const z = (small ? 0.6 : 1) * (0.9 + 0.8 * Math.sin(2 * t + 1) + (k < 12 ? (k / 12) * 1.2 : 0));
+      zs.push(Math.max(0.3, z));
       const top = iso(i, j, Math.max(0.3, z)), ground = iso(i, j);
       pts.push({ x: top.x, y: top.y, gx: ground.x, gy: ground.y });
     }
     const xs = pts.flatMap((q) => [q.x, q.gx]), ys = pts.flatMap((q) => [q.y, q.gy]);
     this.cullables.push({ obj: g, x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) });
     const c = l.wet ? 0xd6eaf8 : Phaser.Display.Color.IntegerToColor(l.color).lighten(25).color;
-    pts.forEach((q, k) => { if (k % 4 === 0) g.lineStyle(5, 0x7f8c8d, 0.8).lineBetween(q.x, q.y, q.gx, q.gy); });
-    g.lineStyle(14, 0x2c3e50, 0.6).beginPath().moveTo(pts[0].x, pts[0].y);
+    const steel = l.id === "minetrain" ? 0x6b4a2b : 0x8a9196; // the mine train runs on a wooden trestle
+    // Supports: A-frames with a cross brace, so the structure reads at a glance.
+    pts.forEach((q, k) => {
+      if (k % 3 !== 0 || q.gy - q.y < 8) return;
+      g.lineStyle(5, steel, 0.9).lineBetween(q.x - 9, q.gy, q.x, q.y).lineBetween(q.x + 9, q.gy, q.x, q.y);
+      g.lineStyle(3, steel, 0.8).lineBetween(q.x - 5, (q.gy + q.y) / 2 + 4, q.x + 5, (q.gy + q.y) / 2 + 4);
+      g.fillStyle(0x000000, 0.18).fillEllipse(q.x, q.gy, 26, 10);
+    });
+    // Track: a dark spine, ties across it, and two coloured rails.
+    const nrm = (k: number) => {
+      const a = pts[Math.max(0, k - 1)], b = pts[Math.min(pts.length - 1, k + 1)];
+      const len = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+      return { x: -(b.y - a.y) / len, y: (b.x - a.x) / len };
+    };
+    g.lineStyle(16, 0x2c3e50, 0.55).beginPath().moveTo(pts[0].x, pts[0].y);
     for (const q of pts.slice(1)) g.lineTo(q.x, q.y);
     g.strokePath();
-    g.lineStyle(8, c, 1).beginPath().moveTo(pts[0].x, pts[0].y);
-    for (const q of pts.slice(1)) g.lineTo(q.x, q.y);
-    g.strokePath();
+    pts.forEach((q, k) => {
+      const n = nrm(k);
+      g.lineStyle(3, 0x3b3b3b, 0.9).lineBetween(q.x - n.x * 9, q.y - n.y * 9, q.x + n.x * 9, q.y + n.y * 9);
+    });
+    for (const side of [-1, 1]) {
+      g.lineStyle(4, c, 1).beginPath();
+      pts.forEach((q, k) => {
+        const n = nrm(k), x = q.x + n.x * 6 * side, y = q.y + n.y * 6 * side;
+        if (k) g.lineTo(x, y); else g.moveTo(x, y);
+      });
+      g.strokePath();
+    }
+    // A train that actually runs the course.
+    const tint = Phaser.Display.Color.IntegerToColor(l.color).color;
+    this.bakeRideCars();
+    const cars = [0, 1, 2, 3].map((k) => this.add.image(0, 0, "car_coaster").setTint(k === 0 ? 0xffffff : tint).setOrigin(0.5, 0.8).setDepth(cx + cy + 1.05));
+    this.coasters.push({ id: l.id, pts: pts.map((q, k) => ({ x: q.x, y: q.y, z: zs[k] })), cars, s: Math.random() * pts.length });
   }
 
   ferrisWheel(l: LocDef) {
@@ -864,6 +993,12 @@ class Park extends Phaser.Scene {
       g.generateTexture(key, w, h);
       g.destroy();
     };
+    make("car_coaster", 30, 20, (g) => {
+      g.fillStyle(0x000000, 0.3).fillRoundedRect(1, 6, 28, 13, 5);
+      g.fillStyle(0xffffff, 1).fillRoundedRect(1, 4, 28, 12, 5);
+      g.fillStyle(0x333333, 1).fillRect(5, 5, 8, 4).fillRect(17, 5, 8, 4); // seats
+      g.fillStyle(0xf0c8a0, 1).fillCircle(9, 3, 3).fillCircle(21, 3, 3); // riders
+    });
     make("car_cup", 40, 34, (g) => {
       g.fillStyle(0x000000, 0.25).fillEllipse(20, 28, 38, 12);
       g.fillStyle(0xdddddd, 1).fillEllipse(20, 26, 36, 12); // saucer
@@ -1649,6 +1784,20 @@ class Park extends Phaser.Scene {
       cam.centerOn(cam.midPoint.x + (p.x - cam.midPoint.x) * k, cam.midPoint.y + (p.y - cam.midPoint.y) * k);
     }
     // Rides in motion (they stop when the ride is closed).
+    for (const co of this.coasters) {
+      if (this.sim.isClosed(co.id) || !this.inView(co.cars[0].x, co.cars[0].y + 1)) {
+        if (!this.sim.isClosed(co.id)) co.s = (co.s + dtMs / 90) % co.pts.length; // keep running off-screen
+      } else {
+        const n = co.pts.length;
+        const zNow = co.pts[Math.floor(co.s) % n].z;
+        co.s = (co.s + (dtMs / 1000) * (3 + (2.6 - zNow) * 5)) % n; // slow up the lift, fast at the bottom
+      }
+      const n = co.pts.length;
+      co.cars.forEach((car, k) => {
+        const f = (co.s - k * 1.1 + n) % n, a = co.pts[Math.floor(f)], b = co.pts[(Math.floor(f) + 1) % n], t = f % 1;
+        car.setPosition(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+      });
+    }
     for (const wh of this.wheels) {
       const spin = this.sim.isClosed("wheel") ? 0 : dtMs / 1000 * 0.12;
       wh.wg.rotation += spin;
