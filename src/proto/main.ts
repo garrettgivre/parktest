@@ -26,6 +26,11 @@ const TIPS: { id: string; when: (s: Sim) => boolean; text: string }[] = [
 ];
 
 const CROWD = 44;
+/** One glanceable icon per building, so the map reads at a glance. */
+const CATEGORY_ICON = (l: LocDef) =>
+  l.kind === "ride" ? (l.wheel ? "🎡" : l.coaster ? "🎢" : l.wet ? "💦" : l.id === "glitter" || l.id === "meteor" ? "🗼" : l.id === "barn" ? "👻" : "🎠")
+    : ({ food: "🍔", restroom: "🚻", shop: "🛍️", show: "🎭", game: "🎯", photo: "📸", gate: "🎟️", relations: "❓",
+      station: l.mode === "sky" ? "🚡" : "🚉" } as Record<string, string>)[l.kind] ?? "•";
 const GRAYBOX = store.get("park.graybox") === "1"; // Settings: show gray-box blocks instead of rendered art
 const SHIRTS = [0xe74c3c, 0x3498db, 0x9b59b6, 0x1abc9c, 0xf1c40f, 0xe67e22, 0xecf0f1, 0x34495e, 0x16a085, 0xd35400];
 
@@ -84,6 +89,7 @@ class Park extends Phaser.Scene {
   dyn!: Phaser.GameObjects.Graphics;
   locLabels: Record<string, Phaser.GameObjects.Text> = {};
   landLabels: Phaser.GameObjects.Text[] = [];
+  pins: Record<string, Phaser.GameObjects.Text> = {};
   trainPhase = 0;
   night!: Phaser.GameObjects.Rectangle;
   swans: { img: Phaser.GameObjects.Image; f: number; phase: number; speed: number }[] = [];
@@ -159,6 +165,7 @@ class Park extends Phaser.Scene {
     this.lastSide = this.lastHud = "";
     this.lastFeed = -1;
     this.locLabels = {};
+    this.pins = {};
     this.cullables = [];
     this.wheels = [];
     this.drops = [];
@@ -463,6 +470,9 @@ class Park extends Phaser.Scene {
         fontFamily: "Trebuchet MS, Verdana, sans-serif", fontSize: "40px", color: "#ffffff",
         stroke: "#000000", strokeThickness: 8, align: "center",
       }).setOrigin(0.5, 1).setDepth(6000);
+      this.pins[l.id] = this.add.text(top.x, top.y - 10, CATEGORY_ICON(l), {
+        fontSize: "56px", backgroundColor: "#ffffffcc", padding: { x: 6, y: 2 },
+      }).setOrigin(0.5, 1).setDepth(5990);
     }
     for (const [k, d] of DECOR.entries()) {
       const ij = { i: (d.u + d.v) / 2, j: (d.v - d.u) / 2 };
@@ -653,7 +663,7 @@ class Park extends Phaser.Scene {
         if (Math.abs(uu) < 13 && vv > DEPOT_V - 3 && vv < LOT_V + 14) continue;
         const berm = r > R * 1.95 && r < R * 2.35;
         if (r > R * 2.35) continue;
-        if (!berm && hash(n + 0.25) < 0.45) continue; // keep the park airy
+        if (!berm && hash(n + 0.25) < 0.62) continue; // keep the park airy and readable
         const i = (uu + vv) / 2, j = (vv - uu) / 2;
         if (segs.some((sg) => segDist(i, j, sg) < 1.5)) continue;
         if (blocks.some((bk) => Math.hypot(i - bk.i, j - bk.j) < bk.r)) continue;
@@ -1064,7 +1074,7 @@ class Park extends Phaser.Scene {
     // Background crowd (pre-baked pawn images), scaled with how busy the park is.
     const h = s.time / 60;
     const busy = (0.6 + 0.6 * Math.exp(-((h - 15) ** 2) / 8)) / 1.2;
-    const shown = Math.round(this.crowd.length * busy);
+    const shown = (zoom * HALF * 2) / DPR < 16 ? 0 : Math.round(this.crowd.length * busy); // no crowd when zoomed far out
     this.crowd.forEach((c, n) => {
       const vis = n < shown;
       c.img.setVisible(vis);
@@ -1138,15 +1148,27 @@ class Park extends Phaser.Scene {
     }
     for (let n = k; n < this.icons.length; n++) this.icons[n].setVisible(false);
 
-    // Labels hold a constant on-screen size; hide building names when zoomed far out.
+    // Levels of detail. Far: zone names + what matters. Normal: a category icon per building,
+    // names only where they matter right now. Close: everything.
     const tileCss = (zoom * HALF * 2) / DPR;
-    const ls = (12 * DPR) / (40 * zoom);
-    for (const t of Object.values(this.locLabels)) {
-      const vis = tileCss >= 20 && this.inView(t.x, t.y);
-      if (t.visible !== vis) t.setVisible(vis);
-      if (vis && t.scaleX !== ls) t.setScale(ls);
+    const near = tileCss >= 44, mid = tileCss >= 20;
+    const ls = (12 * DPR) / (40 * zoom), ps = (15 * DPR) / (64 * zoom);
+    const imp = this.importantLocs();
+    for (const [id, t] of Object.entries(this.locLabels)) {
+      const inv = this.inView(t.x, t.y);
+      const showName = inv && (near || (mid && imp.has(id)));
+      if (t.visible !== showName) t.setVisible(showName);
+      if (showName && t.scaleX !== ls) t.setScale(ls);
+      const pin = this.pins[id];
+      const showPin = inv && !showName && (mid || imp.has(id));
+      if (pin.visible !== showPin) pin.setVisible(showPin);
+      if (showPin) {
+        if (pin.scaleX !== ps) pin.setScale(ps);
+        const txt = (this.wishLocs.has(id) ? "⭐" : "") + CATEGORY_ICON(LOC[id]);
+        if (pin.text !== txt) pin.setText(txt);
+      }
     }
-    for (const t of this.landLabels) t.setScale(Math.max(ls * 1.2, 1)).setAlpha(tileCss >= 20 ? 0.55 : 0.95);
+    for (const t of this.landLabels) t.setScale(Math.max(ls * 1.2, 1)).setAlpha(near ? 0.35 : mid ? 0.6 : 0.95);
   }
 
   pawn(g: Phaser.GameObjects.Graphics, x: number, y: number, color: number, worker = false, k = 1, tie = false) {
@@ -1156,6 +1178,21 @@ class Park extends Phaser.Scene {
     if (k >= 1) g.lineStyle(3, 0x000000, 0.7).strokeRoundedRect(x - 13, y - 70, 26, 58, 9).strokeCircle(x, y - 82, 14);
     if (worker) g.fillStyle(0x1e5631, 1).fillRect(x - 15, y - 98, 30, 9);
     if (tie) g.fillStyle(0xc0392b, 1).fillTriangle(x - 4, y - 66, x + 4, y - 66, x, y - 36);
+  }
+
+  wishLocs = new Set<string>();
+
+  /** Places worth naming right now: their known plans, where they are, your duty, your selection. */
+  importantLocs() {
+    const s = this.sim, out = new Set<string>();
+    this.wishLocs = new Set(s.wishes.filter((w) => w.revealed && !w.done && !w.failed).map((w) => w.def.loc));
+    for (const id of this.wishLocs) out.add(id);
+    if (s.duty) out.add(s.duty.loc);
+    if (this.sel?.kind === "loc") out.add(this.sel.id);
+    const a = s.g.act;
+    if ((a.t === "queue" || a.t === "busy") && a.loc) out.add(a.loc);
+    if (a.t === "walk" && s.heard()) out.add(a.goal.loc);
+    return out;
   }
 
   updateLabels() {
@@ -1170,7 +1207,7 @@ class Park extends Phaser.Scene {
       if (ga.t === "queue" && ga.loc === l.id) status += ` · 👥 ${Math.round((1 - ga.left / ga.total) * 100)}% to front`;
       const text = status ? `${l.name}\n${status}` : l.name;
       if (t.text !== text) t.setText(text);
-      const color = s.isClosed(l.id) ? "#ffb3a7" : st.def.kind === "ride" ? "#ffffff" : "#fff3c4";
+      const color = s.isClosed(l.id) ? "#ffb3a7" : this.wishLocs.has(l.id) ? "#ffd166" : st.def.kind === "ride" ? "#ffffff" : "#fff3c4";
       if (t.style.color !== color) t.setColor(color);
     }
   }
